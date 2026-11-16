@@ -1,0 +1,1335 @@
+diff --git a/apps/web/src/components/InitiativeSidebar.browser.test.tsx b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
+index 2da2f6a319..ea36a795c6 100644
+--- a/apps/web/src/components/InitiativeSidebar.browser.test.tsx
++++ b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
+@@ -58,8 +58,9 @@ vi.mock(import("../hooks/useSettings"), () => ({
+       callbacks?.onSaved?.();
+     }) as never,
+ }));
++import { openInitiativeEditor } from "./initiativeEditor";
+ import { initiativeLayout } from "./InitiativeSidebar.logic";
+-import { InitiativeSidebar } from "./InitiativeSidebar";
++import { InitiativeSidebar, InitiativeEditorHost } from "./InitiativeSidebar";
+ const environmentId = EnvironmentId.make("local");
+ const pm = ThreadId.make("pm");
+ const api = ThreadId.make("api");
+@@ -69,6 +70,23 @@ const threads = [
+ ].map((thread) => ({ ...thread, environmentId, archivedAt: null })) as EnvironmentThreadShell[];
+ const view = () => (
+   <ul>
++    {state.supported && (
++      <li>
++        <button
++          onClick={() =>
++            openInitiativeEditor({
++              environmentId,
++              id: "new-group",
++              isNew: true,
++              group: { name: "", coordinatorThreadId: null, memberThreadIds: [] },
++            })
++          }
++        >
++          New initiative
++        </button>
++      </li>
++    )}
++    <InitiativeEditorHost threads={threads} />
+     <InitiativeSidebar
+       threads={threads}
+       groups={
+diff --git a/apps/web/src/components/InitiativeSidebar.logic.test.ts b/apps/web/src/components/InitiativeSidebar.logic.test.ts
+index ae2eab766f..9c8033494f 100644
+--- a/apps/web/src/components/InitiativeSidebar.logic.test.ts
++++ b/apps/web/src/components/InitiativeSidebar.logic.test.ts
+@@ -1,7 +1,12 @@
+ import { expect, it } from "vite-plus/test";
+ import { EnvironmentId, ProjectId, ThreadId, type Initiative } from "@t3tools/contracts";
+ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+-import { initiativeMembers, initiativeSummary, initiativeLayout } from "./InitiativeSidebar.logic";
++import {
++  initiativeMembers,
++  initiativeStatusCounts,
++  initiativeSummary,
++  initiativeLayout,
++} from "./InitiativeSidebar.logic";
+ it("keeps the coordinator first and accounts for every member including unloaded sessions", () => {
+   const id = (value: string) => ThreadId.make(value);
+   const group: Initiative = {
+@@ -16,6 +21,14 @@ it("keeps the coordinator first and accounts for every member including unloaded
+     ["api", shell({ runtime: { status: "running" } })],
+     ["ui", shell({ settledOverride: "settled" })],
+   ]);
++  expect(
++    initiativeStatusCounts(group, threads).map(({ status, count }) => [status, count]),
++  ).toEqual([
++    ["attention", 1],
++    ["working", 1],
++    ["ready", 1],
++    ["unloaded", 1],
++  ]);
+   expect(initiativeSummary(group, threads)).toBe(
+     "1 needs you · 1 working · 1 idle or done · 1 not loaded",
+   );
+diff --git a/apps/web/src/components/InitiativeSidebar.logic.ts b/apps/web/src/components/InitiativeSidebar.logic.ts
+index 2f725aade2..1ddc9811b8 100644
+--- a/apps/web/src/components/InitiativeSidebar.logic.ts
++++ b/apps/web/src/components/InitiativeSidebar.logic.ts
+@@ -11,10 +11,10 @@ export function initiativeMembers(group: Initiative): readonly ThreadId[] {
+   ];
+ }
+ 
+-export function initiativeSummary(
++export function initiativeStatusCounts(
+   group: Initiative,
+   threads: ReadonlyMap<string, EnvironmentThreadShell>,
+-): string {
++) {
+   const counts = { working: 0, attention: 0, failed: 0, waiting: 0, ready: 0, unloaded: 0 };
+   for (const id of initiativeMembers(group)) {
+     const thread = threads.get(id);
+@@ -31,15 +31,25 @@ export function initiativeSummary(
+   }
+   return (
+     [
+-      [counts.attention, "needs you"],
+-      [counts.failed, "failed"],
+-      [counts.working, "working"],
+-      [counts.waiting, "waiting"],
+-      [counts.ready, "idle or done"],
+-      [counts.unloaded, "not loaded"],
+-    ]
+-      .filter(([count]) => count !== 0)
+-      .map(([count, label]) => `${count} ${label}`)
++      { status: "attention", label: "needs you" },
++      { status: "failed", label: "failed" },
++      { status: "working", label: "working" },
++      { status: "waiting", label: "waiting" },
++      { status: "ready", label: "idle or done" },
++      { status: "unloaded", label: "not loaded" },
++    ] as const
++  )
++    .map((item) => ({ ...item, count: counts[item.status] }))
++    .filter((item) => item.count > 0);
++}
++
++export function initiativeSummary(
++  group: Initiative,
++  threads: ReadonlyMap<string, EnvironmentThreadShell>,
++): string {
++  return (
++    initiativeStatusCounts(group, threads)
++      .map(({ count, label }) => `${count} ${label}`)
+       .join(" · ") || "No sessions"
+   );
+ }
+diff --git a/apps/web/src/components/InitiativeSidebar.tsx b/apps/web/src/components/InitiativeSidebar.tsx
+index 49883665e0..4f0c892418 100644
+--- a/apps/web/src/components/InitiativeSidebar.tsx
++++ b/apps/web/src/components/InitiativeSidebar.tsx
+@@ -5,18 +5,17 @@ import {
+   useInitiativeEditor,
+   type InitiativeEditorTarget,
+ } from "./initiativeEditor";
+-import { randomUUID } from "../lib/utils";
+ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+ import type { EnvironmentId, Initiative, InitiativeChange, ThreadId } from "@t3tools/contracts";
+ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+ import * as Schema from "effect/Schema";
+-import { ChevronDownIcon, EllipsisIcon, PlusIcon } from "lucide-react";
++import { ChevronDownIcon, EllipsisIcon } from "lucide-react";
+ import { appAtomRegistry } from "../rpc/atomRegistry";
+ import { threadFamilies } from "../state/threads";
+-import { useEnvironments } from "../state/environments";
+ import { useUpdateEnvironmentSettings } from "../hooks/useSettings";
+ import { useLocalStorage } from "../hooks/useLocalStorage";
+ import { Button } from "./ui/button";
++import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
+ import { Input } from "./ui/input";
+ import {
+   Dialog,
+@@ -31,10 +30,19 @@ import { Menu, MenuTrigger, MenuPopup, MenuItem } from "./ui/menu";
+ import {
+   initiativeMembers,
+   initiativeSummary,
++  initiativeStatusCounts,
+   type InitiativeSidebarGroup,
+ } from "./InitiativeSidebar.logic";
+ 
+ const collapsedSchema = Schema.Array(Schema.String);
++const statusColors = {
++  attention: "text-warning-foreground",
++  failed: "text-error-foreground",
++  working: "text-info-foreground",
++  waiting: "text-warning-foreground",
++  ready: "text-sidebar-muted-foreground",
++  unloaded: "text-sidebar-muted-foreground",
++};
+ 
+ type GroupRef = InitiativeEditorTarget;
+ interface Props {
+@@ -45,6 +53,7 @@ interface Props {
+     parent: string,
+     initiative?: { coordinator: boolean; hasChildren: boolean },
+   ) => ReactNode;
++  onNewThread?: (target: InitiativeSidebarGroup) => void;
+   onOpen: (environmentId: EnvironmentId, threadId: ThreadId) => void;
+ }
+ 
+@@ -200,6 +209,7 @@ function InitiativeGroup({
+   renderThread,
+   onOpen,
+   onManage,
++  onNewThread,
+ }: Props & { target: InitiativeSidebarGroup; onManage: () => void }) {
+   const update = useUpdateEnvironmentSettings(target.environmentId);
+   const [collapsed, setCollapsed] = useLocalStorage(
+@@ -225,6 +235,8 @@ function InitiativeGroup({
+       for (const release of releases) release();
+     };
+   }, [target.environmentId, membersKey]);
++  const summary = initiativeSummary(target.displayed, byId);
++  const statusCounts = initiativeStatusCounts(target.displayed, byId);
+   if (target.hidden) return null;
+   return (
+     <li
+@@ -232,27 +244,49 @@ function InitiativeGroup({
+       data-initiative={target.id}
+     >
+       <div
+-        className={`flex items-center gap-1 bg-sidebar-control-surface px-3 py-2 ${closed ? "rounded-lg" : "rounded-t-lg"}`}
++        className={`flex items-center gap-1 bg-sidebar-control-surface px-3 py-1 ${closed ? "rounded-lg" : "rounded-t-lg"}`}
+       >
+-        <button
+-          type="button"
+-          data-sidebar-row={key}
+-          aria-expanded={!closed}
+-          className="min-w-0 flex-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+-          onClick={() =>
+-            setCollapsed((current) =>
+-              closed ? current.filter((item) => item !== key) : [...current, key],
+-            )
+-          }
+-        >
+-          <span className="flex items-center gap-2 text-sm font-medium">
+-            <ChevronDownIcon className={closed ? "size-3 -rotate-90" : "size-3"} />
+-            {target.group.name}
+-          </span>
+-          <span className="block truncate pl-5 text-xs text-sidebar-muted-foreground">
+-            {initiativeSummary(target.displayed, byId)}
+-          </span>
+-        </button>
++        <Tooltip>
++          <TooltipTrigger
++            render={
++              <button
++                type="button"
++                data-sidebar-row={key}
++                aria-expanded={!closed}
++                aria-label={`${target.group.name}: ${summary}`}
++                className="min-w-0 flex-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
++                onClick={() =>
++                  setCollapsed((current) =>
++                    closed ? current.filter((item) => item !== key) : [...current, key],
++                  )
++                }
++              />
++            }
++          >
++            <span className="grid min-w-0 grid-cols-[auto_minmax(3rem,1fr)_minmax(0,auto)] items-center gap-2 text-sm font-medium">
++              <ChevronDownIcon
++                className={closed ? "size-3 shrink-0 -rotate-90" : "size-3 shrink-0"}
++              />
++              <span className="min-w-0 truncate">{target.group.name}</span>
++              <span
++                aria-hidden
++                className="flex min-w-0 items-center gap-1.5 overflow-x-auto text-xs tabular-nums [scrollbar-width:none]"
++              >
++                {statusCounts.map(({ status, count }) => (
++                  <span
++                    key={status}
++                    className={`shrink-0 whitespace-nowrap ${statusColors[status]}`}
++                  >
++                    {count}
++                  </span>
++                ))}
++              </span>
++            </span>
++          </TooltipTrigger>
++          <TooltipPopup>
++            {target.group.name}: {summary}
++          </TooltipPopup>
++        </Tooltip>
+         <Menu>
+           <MenuTrigger
+             render={
+@@ -266,6 +300,7 @@ function InitiativeGroup({
+             <EllipsisIcon />
+           </MenuTrigger>
+           <MenuPopup>
++            {onNewThread && <MenuItem onClick={() => onNewThread(target)}>New thread…</MenuItem>}
+             <MenuItem onClick={onManage}>Manage initiative</MenuItem>
+             <MenuItem
+               onClick={() => update({ initiativeChange: { action: "delete", id: target.id } })}
+@@ -319,34 +354,21 @@ function InitiativeGroup({
+   );
+ }
+ 
+-export function InitiativeSidebar(props: Props) {
+-  const { environments } = useEnvironments();
++export function InitiativeEditorHost({ threads }: Pick<Props, "threads">) {
+   const editing = useInitiativeEditor();
++  return editing === null ? null : (
++    <GroupEditor
++      key={`${editing.environmentId}:${editing.id}`}
++      target={editing}
++      threads={threads}
++      onClose={() => closeInitiativeEditor()}
++    />
++  );
++}
++
++export function InitiativeSidebar(props: Props) {
+   return (
+     <>
+-      {environments
+-        .filter((environment) => environment.serverConfig?.initiativeGroups === true)
+-        .map((environment) => (
+-          <Fragment key={environment.environmentId}>
+-            <li className="list-none">
+-              <Button
+-                variant="ghost-muted"
+-                size="sm"
+-                onClick={() =>
+-                  openInitiativeEditor({
+-                    environmentId: environment.environmentId,
+-                    id: randomUUID(),
+-                    isNew: true,
+-                    group: { name: "", coordinatorThreadId: null, memberThreadIds: [] },
+-                  })
+-                }
+-              >
+-                <PlusIcon />
+-                New initiative{environments.length > 1 ? ` · ${environment.label}` : ""}
+-              </Button>
+-            </li>
+-          </Fragment>
+-        ))}
+       {props.groups.map((target) => (
+         <InitiativeGroup
+           key={`${target.environmentId}:${target.id}`}
+@@ -355,14 +377,6 @@ export function InitiativeSidebar(props: Props) {
+           onManage={() => openInitiativeEditor(target)}
+         />
+       ))}
+-      {editing !== null && (
+-        <GroupEditor
+-          key={`${editing.environmentId}:${editing.id}`}
+-          target={editing}
+-          threads={props.threads}
+-          onClose={() => closeInitiativeEditor()}
+-        />
+-      )}
+     </>
+   );
+ }
+diff --git a/apps/web/src/components/NewInitiativeThreadDialog.tsx b/apps/web/src/components/NewInitiativeThreadDialog.tsx
+new file mode 100644
+index 0000000000..e4f0536f47
+--- /dev/null
++++ b/apps/web/src/components/NewInitiativeThreadDialog.tsx
+@@ -0,0 +1,309 @@
++import { retainSavedThreadWorkspace } from "../composerDraftStore";
++import { resolveDefaultNewThreadEnvMode } from "../hooks/useHandleNewThread";
++import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
++import { scopeThreadRef, scopeProjectRef } from "@t3tools/client-runtime/environment";
++import {
++  AuthOrchestrationOperateScope,
++  AuthSettingsWriteScope,
++  CommandId,
++  type ScopedThreadRef,
++  type ThreadId,
++} from "@t3tools/contracts";
++import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
++import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
++import { LayersIcon } from "lucide-react";
++import * as Schema from "effect/Schema";
++import { useLocalStorage } from "../hooks/useLocalStorage";
++import { useRef, useState } from "react";
++
++import { newThreadId, newDraftId, randomUUID } from "../lib/utils";
++import { resolveProjectDefaultProviderModelSelection } from "../providerInstances";
++import { appAtomRegistry } from "../rpc/atomRegistry";
++import { useProjects } from "../state/entities";
++import { useEnvironments } from "../state/environments";
++import { environmentServerConfigsAtom, serverEnvironment } from "../state/server";
++import {
++  readEnvironmentScope,
++  useEnvironmentScope,
++  useEnvironmentsWithScope,
++} from "../state/session";
++import { threadEnvironment } from "../state/threads";
++import { useAtomCommand } from "../state/use-atom-command";
++import { useOrchestrationCommand } from "../state/use-orchestration-command";
++import type { InitiativeSidebarGroup } from "./InitiativeSidebar.logic";
++import { openInitiativeEditor } from "./initiativeEditor";
++import { SidebarHeaderIconButton } from "./sidebar/SidebarThreadHeader";
++import { Button } from "./ui/button";
++import {
++  Dialog,
++  DialogPopup,
++  DialogHeader,
++  DialogTitle,
++  DialogDescription,
++  DialogPanel,
++  DialogFooter,
++} from "./ui/dialog";
++import { Menu, MenuTrigger, MenuPopup, MenuItem } from "./ui/menu";
++
++const collapsedSchema = Schema.Array(Schema.String);
++
++export function NewInitiativeButton() {
++  const { environments } = useEnvironments();
++  const writable = useEnvironmentsWithScope(environments, AuthSettingsWriteScope);
++  const supported = environments.filter(
++    (environment) =>
++      environment.serverConfig?.initiativeGroups === true &&
++      writable.has(environment.environmentId),
++  );
++  const open = (environmentId: InitiativeSidebarGroup["environmentId"]) =>
++    openInitiativeEditor({
++      environmentId,
++      id: randomUUID(),
++      isNew: true,
++      group: { name: "", coordinatorThreadId: null, memberThreadIds: [] },
++    });
++  if (supported.length === 0) return null;
++  if (supported.length === 1)
++    return (
++      <SidebarHeaderIconButton
++        label="New initiative"
++        onClick={() => open(supported[0]!.environmentId)}
++      >
++        <LayersIcon />
++      </SidebarHeaderIconButton>
++    );
++  return (
++    <Menu>
++      <MenuTrigger render={<SidebarHeaderIconButton label="New initiative" />}>
++        <LayersIcon />
++      </MenuTrigger>
++      <MenuPopup>
++        {supported.map((environment) => (
++          <MenuItem key={environment.environmentId} onClick={() => open(environment.environmentId)}>
++            {environment.label}
++          </MenuItem>
++        ))}
++      </MenuPopup>
++    </Menu>
++  );
++}
++
++export function NewInitiativeThreadDialog({
++  target,
++  onClose,
++  onOpen,
++}: {
++  target: InitiativeSidebarGroup;
++  onClose: () => void;
++  onOpen: (ref: ScopedThreadRef) => void;
++}) {
++  const projects = useProjects().filter(
++    (project) => project.environmentId === target.environmentId && project.archivedAt == null,
++  );
++  const [projectId, setProjectId] = useState("");
++  const selectedProjectId = projectId || projects[0]?.id || "";
++  const [busy, setBusy] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const [attempted, setAttempted] = useState(false);
++  const [created, setCreated] = useState<ThreadId | null>(null);
++  const requestId = useRef(newThreadId());
++  const draftId = useRef(newDraftId());
++  const commandId = useRef(CommandId.make(randomUUID()));
++  const [, setCollapsed] = useLocalStorage(
++    "t3code:initiatives:collapsed",
++    [] as readonly string[],
++    collapsedSchema,
++  );
++  const inFlight = useRef(false);
++  const create = useOrchestrationCommand(threadEnvironment.create, { reportFailure: false });
++  const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
++  const canWrite = useEnvironmentScope(target.environmentId, AuthSettingsWriteScope);
++  const canOperate = useEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope);
++  const start = async (now: number) => {
++    if (inFlight.current) return;
++    if (
++      !readEnvironmentScope(target.environmentId, AuthSettingsWriteScope) ||
++      !readEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope)
++    ) {
++      setError("This connection cannot create and group threads.");
++      return;
++    }
++    const project = projects.find((item) => item.id === selectedProjectId);
++    const config = appAtomRegistry.get(environmentServerConfigsAtom).get(target.environmentId);
++    if (
++      !project ||
++      config?.initiativeGroups !== true ||
++      !Object.hasOwn(config.settings.initiatives, target.id)
++    ) {
++      setError("This project or initiative is no longer available.");
++      return;
++    }
++    inFlight.current = true;
++    setBusy(true);
++    setError(null);
++    const perform = async () => {
++      if (created === null) {
++        const settings = resolveProjectSettings(config.settings, project.id, project).settings;
++        const selection = resolveNewThreadModelSelection({
++          defaultSelection:
++            settings.defaultModelSelection ??
++            resolveProjectDefaultProviderModelSelection(
++              config.providers,
++              config.settings,
++              project.id,
++            ),
++          fallbackSelection: config.settings.fallbackModelSelection ?? null,
++          providers: config.providers,
++          settings: config.settings,
++          projectId: project.id,
++          now,
++        }).selection;
++        if (!selection) {
++          setError("Configure a provider for this project before creating a thread.");
++          return;
++        }
++        const envMode = await resolveDefaultNewThreadEnvMode(
++          scopeProjectRef(target.environmentId, project.id),
++          project,
++          config.settings,
++          config.newProjectsRoot,
++        );
++        setProjectId(project.id);
++        setAttempted(true);
++        const result = await create({
++          environmentId: target.environmentId,
++          input: {
++            commandId: commandId.current,
++            threadId: requestId.current,
++            projectId: project.id,
++            title: "New thread",
++            modelSelection: selection,
++            runtimeMode: settings.defaultRuntimeMode,
++            interactionMode: "default",
++            branch: null,
++            worktreePath: null,
++          },
++        });
++        if (result._tag === "Failure") {
++          setError("Could not create the thread. Try again.");
++          return;
++        }
++        retainSavedThreadWorkspace(
++          draftId.current,
++          scopeProjectRef(target.environmentId, project.id),
++          requestId.current,
++          {
++            envMode,
++            startFromOrigin: resolveNewDraftStartFromOrigin({
++              envMode,
++              newWorktreesStartFromOrigin: settings.newWorktreesStartFromOrigin,
++            }),
++            runtimeMode: settings.defaultRuntimeMode,
++            interactionMode: "default",
++          },
++        );
++        setCreated(requestId.current);
++      }
++      const assigned = await update({
++        environmentId: target.environmentId,
++        input: {
++          patch: {
++            initiativeChange: { action: "assign", id: target.id, threadId: requestId.current },
++          },
++        },
++      });
++      if (
++        assigned._tag === "Failure" ||
++        !assigned.value.initiatives[target.id]?.memberThreadIds.includes(requestId.current)
++      ) {
++        setError(
++          "The thread was created, but could not be added to this initiative. Retry adding it or open the thread.",
++        );
++        return;
++      }
++      try {
++        setCollapsed((values) =>
++          values.filter((item) => item !== `initiative:${target.environmentId}:${target.id}`),
++        );
++      } catch {
++        /* A local preference must not prevent opening the saved thread. */
++      }
++      onOpen(scopeThreadRef(target.environmentId, requestId.current));
++      onClose();
++    };
++    try {
++      await perform();
++    } catch {
++      setError("Could not finish creating and grouping the thread. Try again.");
++    }
++    inFlight.current = false;
++    setBusy(false);
++  };
++  return (
++    <Dialog
++      open
++      onOpenChange={(open) => {
++        if (!open && !inFlight.current) onClose();
++      }}
++    >
++      <DialogPopup>
++        <DialogHeader>
++          <DialogTitle>New thread in {target.group.name}</DialogTitle>
++          <DialogDescription>
++            Choose a project in this environment. The thread joins this initiative without starting
++            an agent.
++          </DialogDescription>
++        </DialogHeader>
++        <DialogPanel>
++          <label className="grid gap-2 text-sm">
++            Project
++            <select
++              aria-label="Project"
++              value={selectedProjectId}
++              disabled={busy || attempted}
++              onChange={(event) => setProjectId(event.target.value)}
++              className="rounded border border-input bg-background p-2"
++            >
++              {projects.map((project) => (
++                <option key={project.id} value={project.id}>
++                  {project.title}
++                </option>
++              ))}
++            </select>
++          </label>
++          {projects.length === 0 && (
++            <p className="mt-3 text-sm">Add a project to this environment first.</p>
++          )}
++          {error && (
++            <p role="alert" className="mt-3 text-sm">
++              {error}
++            </p>
++          )}
++        </DialogPanel>
++        <DialogFooter>
++          <Button variant="outline" disabled={busy} onClick={onClose}>
++            Cancel
++          </Button>
++          {created !== null && (
++            <Button
++              variant="outline"
++              disabled={busy}
++              onClick={() => {
++                onOpen(scopeThreadRef(target.environmentId, created));
++                onClose();
++              }}
++            >
++              Open thread
++            </Button>
++          )}
++          <Button
++            disabled={busy || !selectedProjectId || !canWrite || !canOperate}
++            onClick={() => void start(Date.now())}
++          >
++            {busy ? "Creating…" : created === null ? "Create thread" : "Retry adding to initiative"}
++          </Button>
++        </DialogFooter>
++      </DialogPopup>
++    </Dialog>
++  );
++}
+diff --git a/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx b/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
+new file mode 100644
+index 0000000000..c1f6ef814c
+--- /dev/null
++++ b/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
+@@ -0,0 +1,115 @@
++import { createMemoryHistory } from "@tanstack/react-router";
++import { scopeThreadRef } from "@t3tools/client-runtime/environment";
++import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
++import type * as Context from "effect/Context";
++import { expect, it, vi } from "vite-plus/test";
++import { page } from "vite-plus/test/browser";
++import { AppRoot } from "~/AppRoot";
++import "~/components/ChatView";
++import "~/index.css";
++import { DraftId, useComposerDraftStore } from "../composerDraftStore";
++import { __setClientSettingsForTests } from "~/hooks/useSettings";
++import { getRouter } from "~/router";
++import { useThreadSelectionStore } from "~/threadSelectionStore";
++import {
++  ENVIRONMENT_ID,
++  PROJECT_ID,
++  installFakeEnvironment,
++  threadWithHistory,
++  savedServerSettings,
++  dispatchedCommands,
++  type FakeDriver,
++} from "../../test/fakeEnvironment";
++import { render } from "../../test/render";
++
++vi.mock("../../../../packages/client-runtime/src/connection/driver.ts", async (importOriginal) => {
++  const [actual, { fakeDriver }, Layer] = await Promise.all([
++    importOriginal<{ readonly ConnectionDriver: Context.Key<unknown, FakeDriver> }>(),
++    import("../../test/fakeEnvironment"),
++    import("effect/Layer"),
++  ]);
++  return { ...actual, layer: Layer.succeed(actual.ConnectionDriver, fakeDriver) };
++});
++vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
++  ...(await original()),
++  trackRpcRequestSent: () => {},
++}));
++const settings = () => {
++  localStorage.clear();
++  useThreadSelectionStore.getState().clearSelection();
++  __setClientSettingsForTests({
++    ...DEFAULT_CLIENT_SETTINGS,
++    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
++  });
++};
++
++it("retries grouping the same new thread and opens the initiative editor while searching", async () => {
++  settings();
++  const pm = threadWithHistory("new-thread-pm", 1);
++  using _environment = installFakeEnvironment([pm], {
++    initiativeGroups: true,
++    acceptCommands: true,
++    acceptSettingsUpdates: true,
++    settingsUpdateFailures: 1,
++    settings: {
++      defaultThreadEnvMode: "worktree",
++      initiatives: {
++        routing: { name: "Routing", coordinatorThreadId: pm.id, memberThreadIds: [pm.id] },
++      },
++    },
++  });
++  useComposerDraftStore
++    .getState()
++    .setProjectDraftThreadId(
++      { environmentId: ENVIRONMENT_ID, projectId: PROJECT_ID },
++      DraftId.make("existing-project-draft"),
++    );
++  localStorage.setItem(
++    "t3code:initiatives:collapsed",
++    JSON.stringify([`initiative:${ENVIRONMENT_ID}:routing`]),
++  );
++  await page.viewport(1400, 1100);
++  const router = getRouter(
++    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${pm.id}`] }),
++  );
++  await router.load();
++  await using _app = await render(<AppRoot router={router} />, { router: false });
++  await expect.element(page.getByTestId("sidebar-settled-shelf-toggle")).not.toBeInTheDocument();
++  await page.getByRole("combobox", { name: "Search threads" }).fill("nothing matches");
++  await page.getByRole("button", { name: "New initiative", exact: true }).click();
++  await expect.element(page.getByRole("heading", { name: "New initiative" })).toBeVisible();
++  await page.getByRole("button", { name: "Cancel", exact: true }).click();
++  await page.getByRole("button", { name: "Clear thread search" }).click();
++  await page.getByRole("button", { name: "Manage Routing", exact: true }).click();
++  await page.getByRole("menuitem", { name: "New thread…", exact: true }).click();
++  await expect.element(page.getByRole("heading", { name: "New thread in Routing" })).toBeVisible();
++  await page.getByRole("button", { name: "Create thread", exact: true }).click();
++  await expect
++    .element(page.getByRole("alert"))
++    .toHaveTextContent(
++      "The thread was created, but could not be added to this initiative. Retry adding it or open the thread.",
++    );
++  await expect.element(page.getByRole("combobox", { name: "Project", exact: true })).toBeDisabled();
++  await page.getByRole("button", { name: "Retry adding to initiative", exact: true }).click();
++  await vi.waitFor(() =>
++    expect(savedServerSettings().initiatives.routing?.memberThreadIds.length).toBe(2),
++  );
++  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
++  const created = dispatchedCommands().filter((command) => command.type === "thread.create");
++  expect(created).toHaveLength(1);
++  expect(created[0]).toMatchObject({ projectId: PROJECT_ID, title: "New thread" });
++  expect(
++    useComposerDraftStore
++      .getState()
++      .getDraftSessionByRef(scopeThreadRef(ENVIRONMENT_ID, created[0]!.threadId)),
++  ).toMatchObject({ envMode: "worktree" });
++  expect(
++    useComposerDraftStore.getState().getDraftSession(DraftId.make("existing-project-draft")),
++  ).not.toBeNull();
++  expect(dispatchedCommands().some((command) => command.type === "message.dispatch")).toBe(false);
++  expect(savedServerSettings().initiatives.routing?.memberThreadIds).toContain(
++    created[0]!.threadId,
++  );
++  expect(router.state.location.pathname).toBe(`/${ENVIRONMENT_ID}/${created[0]!.threadId}`);
++  expect(JSON.parse(localStorage.getItem("t3code:initiatives:collapsed")!)).toEqual([]);
++});
+diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
+index 2cd1fec66a..5b48a613a0 100644
+--- a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
++++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
+@@ -113,6 +113,8 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+   const router = getRouter(createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${a.id}`] }));
+   await router.load();
+   await using _app = await render(<AppRoot router={router} />, { router: false });
++  await expect.element(page.getByTestId("sidebar-ungrouped-threads")).toBeVisible();
++  await expect.element(row(flat.title)).toHaveAttribute("data-testid", "sidebar-row-slim");
+   await expect.element(row(b.title)).toBeVisible();
+   await expect
+     .element(page.getByTestId("sidebar-settled-shelf-toggle"))
+diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
+index 60a689e0cb..94af06d445 100644
+--- a/apps/web/src/components/Sidebar.tsx
++++ b/apps/web/src/components/Sidebar.tsx
+@@ -1,4 +1,6 @@
+-import { InitiativeSidebar } from "./InitiativeSidebar";
++import { NewInitiativeButton, NewInitiativeThreadDialog } from "./NewInitiativeThreadDialog";
++import type { InitiativeSidebarGroup } from "./InitiativeSidebar.logic";
++import { InitiativeSidebar, InitiativeEditorHost } from "./InitiativeSidebar";
+ import { initiativeLayout } from "./InitiativeSidebar.logic";
+ import { attachSidebarTree } from "../lib/sidebarTree";
+ import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
+@@ -1051,6 +1053,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+   const highlightedProjectScopeKeyRef = useRef<string | null>(null);
+   // Hold dropped rows until server placement is confirmed; block another pickup from replacing the hold.
+   const [optimisticDrop, setOptimisticDrop] = useState<SidebarOptimisticDrop | null>(null);
++  const [newInitiativeThread, setNewInitiativeThread] = useState<InitiativeSidebarGroup | null>(
++    null,
++  );
+   const threadSearchInputRef = useRef<HTMLInputElement>(null);
+   const [threadSearchQuery, setThreadSearchQuery] = useState("");
+   const [searchHighlightKey, setSearchHighlightKey] = useState<string | null>(null);
+@@ -3208,6 +3213,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                   </ComboboxPopup>
+                 </Combobox>
+               }
++              newInitiativeAction={<NewInitiativeButton />}
+               onNewProject={openAddProjectCommandPalette}
+               onNewThread={handleNewThreadClick}
+               newThreadDisabled={projects.length === 0}
+@@ -3347,6 +3353,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                     )}
+                   >
+                     {(() => {
++                      const otherSessionCount =
++                        visibleDraftSessionCount +
++                        pinnedThreads.length +
++                        activeThreads.length +
++                        workingThreads.length +
++                        snoozedThreads.length +
++                        settledCount;
++                      const hasVisibleInitiatives = initiatives.groups.some(
++                        (group) => !group.hidden,
++                      );
++                      const showOtherSessions = hasVisibleInitiatives && otherSessionCount > 0;
+                       const renderThreadRow = (
+                         thread: EnvironmentThreadShell,
+                         section: SidebarSection,
+@@ -3363,9 +3380,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                           ? folderRowsMultiline
+                             ? "folder-multiline"
+                             : "folder"
+-                          : isCard
+-                            ? "card"
+-                            : "slim";
++                          : showOtherSessions
++                            ? "slim"
++                            : isCard
++                              ? "card"
++                              : "slim";
+                         return (
+                           <SortableThreadRow
+                             key={threadKey}
+@@ -3471,7 +3490,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                         );
+                       };
+                       const from = isContextDrag ? null : (dragState?.activeSection ?? null);
+-                      const items: ReactNode[] = [
++                      const looseItems: ReactNode[] = [
+                         <SidebarDraftBlock
+                           key="draft-sessions"
+                           projectByKey={projectByKey}
+@@ -3482,8 +3501,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                           onDraftContextMenu={handleDraftContextMenu}
+                         />,
+                       ];
+-                      items.push(
++                      const items: ReactNode[] = [
+                         <InitiativeSidebar
++                          onNewThread={setNewInitiativeThread}
+                           key="initiatives"
+                           threads={threads}
+                           groups={initiatives.groups}
+@@ -3499,17 +3519,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                             navigateToThread(scopeThreadRef(environmentId, id))
+                           }
+                         />,
+-                      );
++                      ];
+                       for (const item of sidebarListItems) {
+                         if (item.kind === "thread") {
+                           // Folders draw active rows in their own place below.
+                           if (projectFolders !== null && item.section === "active") continue;
+-                          items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
++                          looseItems.push(
++                            renderThreadRow(threadByKey.get(item.key)!, item.section),
++                          );
+                           continue;
+                         }
+                         if (projectFolders !== null && item.marker === "active-placeholder") {
+                           for (const folder of projectFolders) {
+-                            items.push(
++                            looseItems.push(
+                               <SidebarProjectFolderHeader
+                                 key={`project-folder:${folder.group.projectKey}`}
+                                 group={folder.group}
+@@ -3521,7 +3543,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                               />,
+                             );
+                             for (const thread of folder.threads) {
+-                              items.push(
++                              looseItems.push(
+                                 renderThreadRow(
+                                   thread,
+                                   "active",
+@@ -3534,7 +3556,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                         }
+                         switch (item.marker) {
+                           case "pinned-header":
+-                            items.push(
++                            looseItems.push(
+                               <SidebarDragBoundary
+                                 key="pinned-header"
+                                 marker="pinned-header"
+@@ -3545,7 +3567,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                             );
+                             break;
+                           case "pinned-divider":
+-                            items.push(
++                            looseItems.push(
+                               <SidebarDragBoundary
+                                 key="pinned-divider"
+                                 marker="pinned-divider"
+@@ -3556,7 +3578,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                             );
+                             break;
+                           case "active-placeholder":
+-                            items.push(
++                            looseItems.push(
+                               <SidebarSectionPlaceholder
+                                 key="active-placeholder"
+                                 marker="active-placeholder"
+@@ -3574,11 +3596,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                             );
+                             break;
+                           case "working-header":
+-                            items.push(
++                            looseItems.push(
+                               <SidebarSectionHeader
+                                 key="working-shelf-header"
+                                 marker="working-header"
+-                                className="mt-auto"
++                                className={cn(!showOtherSessions && "mt-auto")}
+                                 label="Working"
+                                 count={workingThreads.length}
+                                 toggle={{
+@@ -3589,11 +3611,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                             );
+                             break;
+                           case "snoozed-header":
+-                            items.push(
++                            looseItems.push(
+                               <SidebarSectionHeader
+                                 key="snoozed-shelf-header"
+                                 marker="snoozed-header"
+-                                className={cn(workingThreads.length === 0 && "mt-auto")}
++                                className={cn(
++                                  !showOtherSessions && workingThreads.length === 0 && "mt-auto",
++                                )}
+                                 label="Snoozed"
+                                 count={snoozedThreads.length}
+                                 toggle={{
+@@ -3604,12 +3628,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                             );
+                             break;
+                           case "settled-header":
+-                            items.push(
++                            looseItems.push(
+                               <SidebarSectionHeader
+                                 key="settled-shelf-header"
+                                 marker="settled-header"
+                                 className={cn(
+-                                  workingThreads.length + snoozedThreads.length === 0 && "mt-auto",
++                                  !showOtherSessions &&
++                                    workingThreads.length + snoozedThreads.length === 0 &&
++                                    "mt-auto",
+                                 )}
+                                 label="Settled"
+                                 count={settledCount}
+@@ -3623,7 +3649,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                             );
+                             break;
+                           case "settled-placeholder":
+-                            items.push(
++                            looseItems.push(
+                               <SidebarSectionPlaceholder
+                                 key="settled-placeholder"
+                                 marker="settled-placeholder"
+@@ -3642,31 +3668,48 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                             break;
+                         }
+                       }
++                      looseItems.push(
++                        settledShelfExpanded && hiddenSettledCount > 0 ? (
++                          <li key="settled:more" className="list-none">
++                            <button
++                              type="button"
++                              data-sidebar-row="settled:more"
++                              data-sidebar-parent="shelf:settled"
++                              disabled={olderSettledShelf.loading}
++                              onClick={() => {
++                                olderSettledShelf.retry();
++                                showMoreSettled();
++                              }}
++                              className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground disabled:cursor-default"
++                            >
++                              {/* Plus means "add", so revealing more uses a chevron. */}
++                              <ChevronDownIcon aria-hidden className="size-4 shrink-0" />
++                              {olderSettledShelf.loading
++                                ? "Loading"
++                                : olderSettledShelf.failed
++                                  ? "Could not load older threads. Retry"
++                                  : `Show ${Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more`}
++                            </button>
++                          </li>
++                        ) : null,
++                      );
++                      if (showOtherSessions) {
++                        items.push(
++                          <li
++                            key="other-sessions"
++                            data-testid="sidebar-ungrouped-threads"
++                            className="mt-3 list-none rounded-lg border border-sidebar-border"
++                          >
++                            <ul aria-label="Threads outside initiatives" className="p-1">
++                              {looseItems}
++                            </ul>
++                          </li>,
++                        );
++                      } else if (!hasVisibleInitiatives || from !== null) {
++                        items.push(...looseItems);
++                      }
+                       return items;
+                     })()}
+-                    {settledShelfExpanded && hiddenSettledCount > 0 ? (
+-                      <li className="list-none">
+-                        <button
+-                          type="button"
+-                          data-sidebar-row="settled:more"
+-                          data-sidebar-parent="shelf:settled"
+-                          disabled={olderSettledShelf.loading}
+-                          onClick={() => {
+-                            olderSettledShelf.retry();
+-                            showMoreSettled();
+-                          }}
+-                          className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground disabled:cursor-default"
+-                        >
+-                          {/* Plus means "add", so revealing more uses a chevron. */}
+-                          <ChevronDownIcon aria-hidden className="size-4 shrink-0" />
+-                          {olderSettledShelf.loading
+-                            ? "Loading"
+-                            : olderSettledShelf.failed
+-                              ? "Could not load older threads. Retry"
+-                              : `Show ${Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more`}
+-                        </button>
+-                      </li>
+-                    ) : null}
+                   </ul>
+                 </SortableContext>
+               </DndContext>
+@@ -3706,6 +3749,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+           ) : null}
+         </SidebarGroup>
+       </SidebarContent>
++      <InitiativeEditorHost threads={threads} />
++      {newInitiativeThread !== null && (
++        <NewInitiativeThreadDialog
++          target={newInitiativeThread}
++          onClose={() => setNewInitiativeThread(null)}
++          onOpen={navigateToThread}
++        />
++      )}
+       <SidebarChromeFooter />
+     </>
+   );
+diff --git a/apps/web/src/components/sidebar/SidebarThreadHeader.tsx b/apps/web/src/components/sidebar/SidebarThreadHeader.tsx
+index e400e03d27..8457d13644 100644
+--- a/apps/web/src/components/sidebar/SidebarThreadHeader.tsx
++++ b/apps/web/src/components/sidebar/SidebarThreadHeader.tsx
+@@ -15,6 +15,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+ export interface SidebarThreadHeaderProps {
+   hasProjects: boolean;
+   projectScope: ReactNode;
++  newInitiativeAction?: ReactNode;
+   onNewProject: () => void;
+   onNewThread: (event: ReactMouseEvent) => void;
+   newThreadDisabled: boolean;
+@@ -34,6 +35,7 @@ export interface SidebarThreadHeaderProps {
+ export function SidebarThreadHeader({
+   hasProjects,
+   projectScope,
++  newInitiativeAction,
+   onNewProject,
+   onNewThread,
+   newThreadDisabled,
+@@ -105,6 +107,7 @@ export function SidebarThreadHeader({
+             </SidebarHeaderIconButton>
+           </>
+         ) : null}
++        {newInitiativeAction}
+         <SidebarHeaderIconButton
+           label="New thread"
+           tooltip={
+diff --git a/apps/web/src/composerDraftStore.ts b/apps/web/src/composerDraftStore.ts
+index dde304da3d..552253f01d 100644
+--- a/apps/web/src/composerDraftStore.ts
++++ b/apps/web/src/composerDraftStore.ts
+@@ -4439,12 +4439,37 @@ export function useComposerDraftModelState(
+   );
+ }
+ 
++const SAVED_THREAD_WORKSPACE_PREFIX = "saved-thread-workspace:";
++
++/** Keeps workspace defaults for an empty saved thread without replacing its project's unsent draft. */
++export function retainSavedThreadWorkspace(
++  draftId: DraftId,
++  projectRef: ScopedProjectRef,
++  threadId: ThreadId,
++  options: Pick<
++    DraftSessionState,
++    "envMode" | "startFromOrigin" | "runtimeMode" | "interactionMode"
++  >,
++): void {
++  const store = useComposerDraftStore.getState();
++  const ref = scopeThreadRef(projectRef.environmentId, threadId);
++  store.setLogicalProjectDraftThreadId(
++    `${SAVED_THREAD_WORKSPACE_PREFIX}${scopedThreadKey(ref)}`,
++    projectRef,
++    draftId,
++    { ...options, threadId },
++  );
++  store.markDraftThreadPromoting(draftId, ref);
++}
++
+ /** Threads a sent draft is launching into: from their shell's arrival until the server owns the send. */
+ export function usePromotingDraftThreadKeys(): ReadonlyArray<string> {
+   return useComposerDraftStore(
+     useShallow((state) =>
+       Object.values(state.draftThreadsByThreadKey).flatMap((draft) =>
+-        draft.promotedTo ? [scopedThreadKey(draft.promotedTo)] : [],
++        draft.promotedTo && !draft.logicalProjectKey.startsWith(SAVED_THREAD_WORKSPACE_PREFIX)
++          ? [scopedThreadKey(draft.promotedTo)]
++          : [],
+       ),
+     ),
+   );
+diff --git a/apps/web/src/hooks/useHandleNewThread.ts b/apps/web/src/hooks/useHandleNewThread.ts
+index 44215edfc5..b0a91f00d5 100644
+--- a/apps/web/src/hooks/useHandleNewThread.ts
++++ b/apps/web/src/hooks/useHandleNewThread.ts
+@@ -3,7 +3,12 @@ import {
+   scopeProjectRef,
+   scopeThreadRef,
+ } from "@t3tools/client-runtime/environment";
+-import { DEFAULT_SERVER_SETTINGS, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
++import {
++  DEFAULT_SERVER_SETTINGS,
++  type ScopedProjectRef,
++  type ThreadId,
++  type ServerSettings,
++} from "@t3tools/contracts";
+ import { type AnyRouter, useRouter } from "@tanstack/react-router";
+ import {
+   composerDraftHasUserContent,
+@@ -78,6 +83,46 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
+   };
+ }
+ 
++export async function resolveDefaultNewThreadEnvMode(
++  projectRef: ScopedProjectRef,
++  project: EnvironmentProject | undefined,
++  targetServerSettings: ServerSettings,
++  newProjectsRoot: string | null | undefined,
++): Promise<DraftThreadEnvMode> {
++  // Environment queries wait for a connection, so reading the project file on an
++  // offline machine would never settle and the draft would never open.
++  const consultProjectFile =
++    project !== undefined &&
++    resolveProjectSettings(targetServerSettings, project?.id ?? null, project).settings
++      .defaultThreadEnvMode === null &&
++    appAtomRegistry
++      .get(environmentSummaries.connectedEnvironmentIdsAtom)
++      .includes(project.environmentId);
++  const projectFile = consultProjectFile
++    ? await readT3ProjectFile(project.environmentId, project.workspaceRoot)
++    : null;
++  return resolveNewThreadEnvMode({
++    projectSettings: resolveProjectSettings(
++      targetServerSettings,
++      project?.id ?? null,
++      project,
++      projectFile,
++    ),
++    workspaceRoot: project?.workspaceRoot ?? null,
++    newProjectsRoot,
++    projectHasThreads:
++      readThreadShells().some(
++        (thread) =>
++          thread.environmentId === projectRef.environmentId &&
++          thread.projectId === projectRef.projectId,
++      ) ||
++      readUnloadedThreadCount(
++        [{ environmentId: projectRef.environmentId, id: projectRef.projectId }],
++        [],
++      ) > 0,
++  });
++}
++
+ export function useNewThreadHandler() {
+   return createNewThreadHandler(useRouter());
+ }
+@@ -190,39 +235,13 @@ export function createNewThreadHandler(router: AnyRouter) {
+           currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
+         destinationDraftId,
+       });
+-    const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
+-      // Environment queries wait for a connection, so reading the project file on an
+-      // offline machine would never settle and the draft would never open.
+-      const consultProjectFile =
+-        project !== undefined &&
+-        projectSettings.settings.defaultThreadEnvMode === null &&
+-        appAtomRegistry
+-          .get(environmentSummaries.connectedEnvironmentIdsAtom)
+-          .includes(project.environmentId);
+-      const projectFile = consultProjectFile
+-        ? await readT3ProjectFile(project.environmentId, project.workspaceRoot)
+-        : null;
+-      return resolveNewThreadEnvMode({
+-        projectSettings: resolveProjectSettings(
+-          targetServerSettings,
+-          project?.id ?? null,
+-          project,
+-          projectFile,
+-        ),
+-        workspaceRoot: project?.workspaceRoot ?? null,
+-        newProjectsRoot: environmentServerConfigs.get(projectRef.environmentId)?.newProjectsRoot,
+-        projectHasThreads:
+-          readThreadShells().some(
+-            (thread) =>
+-              thread.environmentId === projectRef.environmentId &&
+-              thread.projectId === projectRef.projectId,
+-          ) ||
+-          readUnloadedThreadCount(
+-            [{ environmentId: projectRef.environmentId, id: projectRef.projectId }],
+-            [],
+-          ) > 0,
+-      });
+-    };
++    const resolveDefaultEnvMode = () =>
++      resolveDefaultNewThreadEnvMode(
++        projectRef,
++        project,
++        targetServerSettings,
++        environmentServerConfigs.get(projectRef.environmentId)?.newProjectsRoot,
++      );
+     const logicalProjectKey = project
+       ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
+       : scopedProjectKey(projectRef);
+diff --git a/apps/web/test/fakeEnvironment.ts b/apps/web/test/fakeEnvironment.ts
+index a70755d002..a3571e5cb2 100644
+--- a/apps/web/test/fakeEnvironment.ts
++++ b/apps/web/test/fakeEnvironment.ts
+@@ -339,6 +339,7 @@ let configOverrides: Partial<ServerConfig> = {};
+ let dispatched: OrchestrationV2Command[] = [];
+ let acceptCommands = false;
+ let acceptSettingsUpdates = false;
++let settingsUpdateFailures = 0;
+ let settingsWrites: ServerSettingsPatch[] = [];
+ const configSubscribers = new Set<Queue.Queue<ServerConfigStreamEvent>>();
+ let sequence = 1;
+@@ -362,6 +363,13 @@ const handlers: Record<string, (input: never) => unknown> = {
+     Effect.gen(function* () {
+       if (!acceptSettingsUpdates) return yield* Effect.never;
+       settingsWrites.push(patch);
++      if (settingsUpdateFailures > 0) {
++        settingsUpdateFailures--;
++        return yield* Effect.fail({
++          _tag: "SimulatedSettingsFailure",
++          message: "Simulated settings failure",
++        });
++      }
+       const settings = applyServerSettingsPatch(serverConfig().settings, patch);
+       configOverrides = { ...configOverrides, settings };
+       yield* Effect.forEach(configSubscribers, (queue) =>
+@@ -498,6 +506,7 @@ export function installFakeEnvironment(
+   options?: {
+     readonly acceptCommands?: boolean;
+     readonly acceptSettingsUpdates?: boolean;
++    readonly settingsUpdateFailures?: number;
+     readonly settings?: Partial<ServerConfig["settings"]>;
+     readonly initiativeGroups?: boolean;
+     readonly projects?: ReadonlyArray<OrchestrationProjectShell>;
+@@ -516,6 +525,7 @@ export function installFakeEnvironment(
+   dispatched = [];
+   acceptCommands = options?.acceptCommands === true;
+   acceptSettingsUpdates = options?.acceptSettingsUpdates === true;
++  settingsUpdateFailures = options?.settingsUpdateFailures ?? 0;
+   settingsWrites = [];
+   globalThis.fetch = async (input, init) => {
+     const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+diff --git a/scripts/scenarios/initiative-save.e2e.ts b/scripts/scenarios/initiative-save.e2e.ts
+index 19b445a163..b54598b6bc 100644
+--- a/scripts/scenarios/initiative-save.e2e.ts
++++ b/scripts/scenarios/initiative-save.e2e.ts
+@@ -25,5 +25,37 @@ test(
+     ).toBeVisible();
+     await app.screenshot("initiative-saved");
+     await expect(screen.getByText("No threads yet", { exact: true })).toBeHidden();
++    await screen.getByRole("button", "Manage Saved initiative", { exact: true }).tap();
++    await screen.getByRole("menuitem", "Remove group; keep sessions", { exact: true }).tap();
+   },
+ );
++
++test("Creates an empty session inside an existing initiative", WEB, async ({ t3, app, screen }) => {
++  const project = await t3.project("initiative-new-thread");
++  await t3.thread({ project, title: "Thread creation PM", messages: ["first"] });
++  await t3.thread({ project, title: "Loose session", messages: ["first"] });
++  await t3.open();
++  await screen.getByRole("button", "New initiative").tap();
++  await screen.getByLabel("Name").fill("Thread creation");
++  await screen.getByLabel("Project manager").selectOption({ label: "Thread creation PM" });
++  await screen.getByRole("button", "Save").tap();
++  await screen.getByRole("button", "Manage Thread creation", { exact: true }).tap();
++  await screen.getByRole("menuitem", "New thread…", { exact: true }).tap();
++  await app.screenshot("initiative-new-thread-project");
++  await screen.getByRole("button", "Create thread", { exact: true }).tap();
++  await expect(screen.getByRole("heading", "New thread in Thread creation")).toBeHidden();
++  await expect(screen.getByRole("button", { name: /New thread,/ })).toBeVisible();
++  await app.screenshot("initiative-new-thread-created");
++  await app.open("/");
++  await expect(screen.getByRole("button", { name: /New thread,/ })).toBeVisible();
++  await screen.getByRole("button", "Manage Thread creation", { exact: true }).tap();
++  await screen.getByRole("menuitem", "Manage initiative", { exact: true }).tap();
++  await screen.getByRole("checkbox", "New thread", { exact: true }).uncheck();
++  await screen.getByRole("button", "Save").tap();
++  await expect(
++    screen.getByRole("list", "Threads outside initiatives", { exact: true }),
++  ).toBeVisible();
++  await expect(screen.getByRole("button", { name: /New thread,/ })).toBeVisible();
++  await expect(screen.getByRole("button", { name: /New thread,.*Preparing/ })).toBeHidden();
++  await app.screenshot("initiative-ungrouped-threads");
++});

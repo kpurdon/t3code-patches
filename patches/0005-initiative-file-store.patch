@@ -1,0 +1,480 @@
+diff --git a/apps/server/src/serverSettings.test.ts b/apps/server/src/serverSettings.test.ts
+index 347b43dd6f..8ba97ef3be 100644
+--- a/apps/server/src/serverSettings.test.ts
++++ b/apps/server/src/serverSettings.test.ts
+@@ -2,6 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+ import * as NodeServices from "@effect/platform-node/NodeServices";
+ import {
+   DEFAULT_SERVER_SETTINGS,
++  ThreadId,
+   globalIdleCompaction,
+   type ManagedPolicyDocument,
+   ModelSelection,
+@@ -136,6 +137,195 @@ function strictSecretReferencePaths(
+ }
+ 
+ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings", (it) => {
++  it.effect("moves legacy initiatives into their own file and serializes membership writes", () =>
++    Effect.gen(function* () {
++      const config = yield* ServerConfig.ServerConfig;
++      const fs = yield* FileSystem.FileSystem;
++      const path = yield* Path.Path;
++      const service = yield* ServerSettingsModule.ServerSettingsService;
++      const initiativesPath = path.join(path.dirname(config.settingsPath), "initiatives.json");
++      const pm = ThreadId.make("pm");
++      const groups = {
++        routing: { name: "Routing", coordinatorThreadId: pm, memberThreadIds: [pm] },
++      };
++      yield* fs.writeFileString(
++        config.settingsPath,
++        JSON.stringify({
++          projectSettingsFolded: true,
++          responseStreamingMode: "turn",
++          initiatives: groups,
++        }),
++      );
++      assert.deepEqual((yield* service.getSettings).initiatives, groups);
++      assert.deepEqual(JSON.parse(yield* fs.readFileString(initiativesPath)), groups);
++      const settingsFile = yield* fs.readFileString(config.settingsPath);
++      assert.isFalse(Object.hasOwn(JSON.parse(settingsFile), "initiatives"));
++      assert.equal(JSON.parse(settingsFile).responseStreamingMode, "turn");
++      yield* Effect.all(
++        [
++          service.updateSettings({
++            initiativeChange: { action: "assign", id: "routing", threadId: ThreadId.make("api") },
++          }),
++          service.updateSettings({
++            initiativeChange: { action: "assign", id: "routing", threadId: ThreadId.make("web") },
++          }),
++        ],
++        { concurrency: "unbounded" },
++      );
++      const saved = (yield* service.getSettings).initiatives.routing!;
++      assert.sameMembers([...saved.memberThreadIds], [pm, "api", "web"]);
++      assert.equal(yield* fs.readFileString(config.settingsPath), settingsFile);
++      assert.deepEqual(JSON.parse(yield* fs.readFileString(initiativesPath)).routing, saved);
++    }).pipe(Effect.provide(layerServerSettings())),
++  );
++
++  it.effect("treats an empty dedicated initiative file as authoritative over legacy settings", () =>
++    Effect.gen(function* () {
++      const config = yield* ServerConfig.ServerConfig;
++      const fs = yield* FileSystem.FileSystem;
++      const path = yield* Path.Path;
++      const service = yield* ServerSettingsModule.ServerSettingsService;
++      const initiativesPath = path.join(path.dirname(config.settingsPath), "initiatives.json");
++      yield* fs.writeFileString(
++        config.settingsPath,
++        JSON.stringify({ projectSettingsFolded: true, initiatives: "retired malformed field" }),
++      );
++      yield* fs.writeFileString(initiativesPath, "{}\n");
++      assert.deepEqual((yield* service.getSettings).initiatives, {});
++      assert.isFalse(
++        Object.hasOwn(JSON.parse(yield* fs.readFileString(config.settingsPath)), "initiatives"),
++      );
++    }).pipe(Effect.provide(layerServerSettings())),
++  );
++
++  it.effect("preserves malformed initiative data and refuses to overwrite it", () =>
++    Effect.gen(function* () {
++      const config = yield* ServerConfig.ServerConfig;
++      const fs = yield* FileSystem.FileSystem;
++      const path = yield* Path.Path;
++      const service = yield* ServerSettingsModule.ServerSettingsService;
++      const initiativesPath = path.join(path.dirname(config.settingsPath), "initiatives.json");
++      const original = '{"projectSettingsFolded":true,"responseStreamingMode":"turn"}';
++      yield* fs.writeFileString(config.settingsPath, original);
++      yield* fs.writeFileString(initiativesPath, "{broken");
++      const error = yield* Effect.flip(
++        service.updateSettings({
++          initiativeChange: { action: "create", id: "new", name: "New", coordinatorThreadId: null },
++        }),
++      );
++      assert.equal(error.operation, "read-file");
++      assert.equal(error.settingsPath, initiativesPath);
++      assert.equal(yield* fs.readFileString(initiativesPath), "{broken");
++      assert.equal(yield* fs.readFileString(config.settingsPath), original);
++    }).pipe(Effect.provide(layerServerSettings())),
++  );
++
++  it.effect("preserves external initiative edits when ordinary preferences are saved", () =>
++    Effect.gen(function* () {
++      const config = yield* ServerConfig.ServerConfig;
++      const fs = yield* FileSystem.FileSystem;
++      const path = yield* Path.Path;
++      const service = yield* ServerSettingsModule.ServerSettingsService;
++      const initiativesPath = path.join(path.dirname(config.settingsPath), "initiatives.json");
++      yield* service.getSettings;
++      const external =
++        '{ "external": { "name": "External", "coordinatorThreadId": null, "memberThreadIds": [] } }';
++      yield* fs.writeFileString(initiativesPath, external);
++      const saved = yield* service.updateSettings({ responseStreamingMode: "turn" });
++      assert.equal(saved.initiatives.external?.name, "External");
++      assert.equal(yield* fs.readFileString(initiativesPath), external);
++      assert.isFalse(
++        Object.hasOwn(JSON.parse(yield* fs.readFileString(config.settingsPath)), "initiatives"),
++      );
++    }).pipe(Effect.provide(layerServerSettings())),
++  );
++
++  it.effect(
++    "keeps legacy initiatives in settings when migration cannot commit the new file",
++    () => {
++      const layerFailingRename = Layer.effect(
++        FileSystem.FileSystem,
++        Effect.map(
++          FileSystem.FileSystem,
++          (fs) =>
++            ({
++              ...fs,
++              rename: (from, to) =>
++                to.endsWith("initiatives.json")
++                  ? Effect.fail(
++                      PlatformError.systemError({
++                        _tag: "PermissionDenied",
++                        module: "FileSystem",
++                        method: "rename",
++                        pathOrDescriptor: to,
++                      }),
++                    )
++                  : fs.rename(from, to),
++            }) satisfies FileSystem.FileSystem,
++        ),
++      );
++      return Effect.gen(function* () {
++        const config = yield* ServerConfig.ServerConfig;
++        const fs = yield* FileSystem.FileSystem;
++        const service = yield* ServerSettingsModule.ServerSettingsService;
++        const original =
++          '{"projectSettingsFolded":true,"initiatives":{"old":{"name":"Old","coordinatorThreadId":null,"memberThreadIds":[]}}}';
++        yield* fs.writeFileString(config.settingsPath, original);
++        const error = yield* Effect.flip(service.getSettings);
++        assert.equal(error.operation, "write-file");
++        assert.equal(yield* fs.readFileString(config.settingsPath), original);
++      }).pipe(Effect.provide(layerServerSettings().pipe(Layer.provide(layerFailingRename))));
++    },
++  );
++
++  it.effect("rolls back an initiative edit when a combined preference save fails", () => {
++    let failSettings = false;
++    const layerFailingRename = Layer.effect(
++      FileSystem.FileSystem,
++      Effect.map(
++        FileSystem.FileSystem,
++        (fs) =>
++          ({
++            ...fs,
++            rename: (from, to) =>
++              failSettings && to.endsWith("settings.json")
++                ? Effect.fail(
++                    PlatformError.systemError({
++                      _tag: "PermissionDenied",
++                      module: "FileSystem",
++                      method: "rename",
++                      pathOrDescriptor: to,
++                    }),
++                  )
++                : fs.rename(from, to),
++          }) satisfies FileSystem.FileSystem,
++      ),
++    );
++    return Effect.gen(function* () {
++      const config = yield* ServerConfig.ServerConfig;
++      const fs = yield* FileSystem.FileSystem;
++      const path = yield* Path.Path;
++      const service = yield* ServerSettingsModule.ServerSettingsService;
++      const initiativesPath = path.join(path.dirname(config.settingsPath), "initiatives.json");
++      const original = '{"projectSettingsFolded":true,"responseStreamingMode":"turn"}';
++      const groups = { old: { name: "Old", coordinatorThreadId: null, memberThreadIds: [] } };
++      yield* fs.writeFileString(config.settingsPath, original);
++      yield* fs.writeFileString(initiativesPath, JSON.stringify(groups));
++      yield* service.getSettings;
++      failSettings = true;
++      const error = yield* Effect.flip(
++        service.updateSettings({
++          initiativeChange: { action: "rename", id: "old", name: "Changed" },
++          responseStreamingMode: "paragraph",
++        }),
++      );
++      assert.equal(error.operation, "write-file");
++      assert.equal(error.settingsPath, config.settingsPath);
++      assert.deepEqual(JSON.parse(yield* fs.readFileString(initiativesPath)), groups);
++      assert.equal(yield* fs.readFileString(config.settingsPath), original);
++    }).pipe(Effect.provide(layerServerSettings().pipe(Layer.provide(layerFailingRename))));
++  });
++
+   it.effect("serializes concurrent model preference edits without cancelling duplicate adds", () =>
+     Effect.gen(function* () {
+       const service = yield* ServerSettingsModule.ServerSettingsService;
+diff --git a/apps/server/src/serverSettings.ts b/apps/server/src/serverSettings.ts
+index 251becba12..a9eda8e731 100644
+--- a/apps/server/src/serverSettings.ts
++++ b/apps/server/src/serverSettings.ts
+@@ -1,5 +1,6 @@
+ import {
+   DEFAULT_SERVER_SETTINGS,
++  Initiatives,
+   ModelSelection,
+   ProjectId,
+   ProjectScript,
+@@ -42,6 +43,7 @@ import * as SchemaTransformation from "effect/SchemaTransformation";
+ import * as Semaphore from "effect/Semaphore";
+ import * as Scope from "effect/Scope";
+ import * as Stream from "effect/Stream";
++import * as Struct from "effect/Struct";
+ import * as SqlClient from "effect/sql/SqlClient";
+ import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
+ import { resolveSymlinkTarget } from "@t3tools/shared/symlink";
+@@ -76,8 +78,12 @@ export {
+ } from "@t3tools/shared/serverSettings";
+ 
+ const encodeServerSettings = Schema.encodeEffect(ServerSettings);
+-const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));
++const encodeServerSettingsJson = Schema.encodeUnknownEffect(
++  fromJsonStringPretty(ServerSettings.mapFields(Struct.omit(["initiatives"]))),
++);
+ const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
++const decodeInitiativesJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Initiatives));
++const encodeInitiativesJson = Schema.encodeEffect(fromJsonStringPretty(Initiatives));
+ 
+ const textEncoder = new TextEncoder();
+ const textDecoder = new TextDecoder();
+@@ -671,6 +677,7 @@ const make = Effect.gen(function* () {
+   const { settingsPath } = yield* ServerConfig.ServerConfig;
+   const fs = yield* FileSystem.FileSystem;
+   const pathService = yield* Path.Path;
++  const initiativesPath = pathService.join(pathService.dirname(settingsPath), "initiatives.json");
+   const secretStore = yield* ServerSecretStore.ServerSecretStore;
+   const sql = yield* SqlClient.SqlClient;
+   const {
+@@ -753,6 +760,58 @@ const make = Effect.gen(function* () {
+     ),
+   );
+ 
++  const readInitiatives = Effect.fn("serverSettings.readInitiatives")(
++    function* () {
++      if (!(yield* fs.exists(initiativesPath))) return Option.none<Initiatives>();
++      return Option.some(yield* decodeInitiativesJson(yield* fs.readFileString(initiativesPath)));
++    },
++    Effect.mapError(
++      (cause) =>
++        new ServerSettingsError({
++          settingsPath: initiativesPath,
++          operation: "read-file",
++          cause,
++        }),
++    ),
++  );
++
++  const writeInitiatives = Effect.fn("serverSettings.writeInitiatives")(
++    function* (initiatives: Initiatives) {
++      const contents = yield* encodeInitiativesJson(initiatives);
++      yield* writeFileStringAtomically({
++        filePath: initiativesPath,
++        contents: `${contents}\n`,
++      }).pipe(
++        Effect.provideService(FileSystem.FileSystem, fs),
++        Effect.provideService(Path.Path, pathService),
++      );
++    },
++    Effect.mapError(
++      (cause) =>
++        new ServerSettingsError({
++          settingsPath: initiativesPath,
++          operation: "write-file",
++          cause,
++        }),
++    ),
++  );
++
++  const persistFiles = Effect.fn("serverSettings.persistFiles")(function* (
++    next: ServerSettings,
++    current: ServerSettings,
++    patch: ServerSettingsPatch,
++    initiativeOnly: boolean,
++  ) {
++    if (patch.initiativeChange === undefined) return yield* writeSettingsAtomically(next);
++    yield* writeInitiatives(next.initiatives);
++    if (initiativeOnly) return;
++    yield* writeSettingsAtomically(next).pipe(
++      Effect.tapError(() =>
++        writeInitiatives(current.initiatives).pipe(Effect.ignore({ log: true })),
++      ),
++    );
++  });
++
+   const moveInlineSettingsSecrets = Effect.fn("serverSettings.moveInlineSettingsSecrets")(
+     function* (settings: ServerSettings) {
+       const pending: SettingsSecret[] = [];
+@@ -784,17 +843,30 @@ const make = Effect.gen(function* () {
+   );
+ 
+   const loadSettingsFromDisk = Effect.gen(function* () {
++    const storedInitiatives = yield* readInitiatives();
+     let settings = managed.defaults;
+     let legacyProviders: Readonly<Record<string, unknown>> | undefined;
+     let legacySourceControl: Parameters<typeof migrateLegacySourceControlSettings>[1] = {};
+     let parseFailure = Option.none<unknown>();
++    let hasLegacyInitiatives = false;
+ 
+     if (yield* readConfigExists) {
+       const raw = yield* readRawConfig;
+       const parsed = decodeSettingsFileJsonExit(raw);
++      const preferences =
++        Exit.isSuccess(parsed) &&
++        Option.isSome(storedInitiatives) &&
++        parsed.value !== null &&
++        typeof parsed.value === "object"
++          ? Object.fromEntries(
++              Object.entries(parsed.value).filter(([key]) => key !== "initiatives"),
++            )
++          : Exit.isSuccess(parsed)
++            ? parsed.value
++            : undefined;
+       const decoded = Exit.isFailure(parsed)
+         ? parsed
+-        : decodePersistedServerSettingsExit(managed.withDefaults(parsed.value));
++        : decodePersistedServerSettingsExit(managed.withDefaults(preferences));
+       const legacySettings = decodeLegacyProviderSettingsJsonExit(raw);
+       if (legacySettings._tag === "Success") {
+         legacyProviders = legacySettings.value.providers;
+@@ -817,8 +889,19 @@ const make = Effect.gen(function* () {
+         }
+       } else {
+         settings = decoded.value;
++        hasLegacyInitiatives =
++          Exit.isSuccess(parsed) &&
++          parsed.value !== null &&
++          typeof parsed.value === "object" &&
++          Object.hasOwn(parsed.value, "initiatives");
+       }
+     }
++    if (Option.isSome(storedInitiatives)) {
++      settings = { ...settings, initiatives: storedInitiatives.value };
++    } else if (hasLegacyInitiatives) {
++      // Commit the copy before removing legacy data; an existing empty file still wins.
++      yield* writeInitiatives(settings.initiatives);
++    }
+     // Settings saved by a server that kept the mode in `compactIdleThreads` move
+     // it to `idleCompaction`, so that switch goes to clients as a boolean. The
+     // defaults gain the field too, which tells clients this server reads modes.
+@@ -916,7 +999,8 @@ const make = Effect.gen(function* () {
+     if (
+       migrated !== loaded ||
+       (settingsFileTrusted && legacyProviders !== undefined) ||
+-      hasLegacySourceControl
++      hasLegacySourceControl ||
++      hasLegacyInitiatives
+     ) {
+       yield* writeSettingsAtomically(migrated);
+       for (const move of sourceControlMigration.secretMoves) {
+@@ -1186,6 +1270,7 @@ const make = Effect.gen(function* () {
+   const updateAndPersistSettings = (
+     patch: ServerSettingsPatch,
+     update: (current: ServerSettings) => Effect.Effect<ServerSettings, ServerSettingsError>,
++    initiativeOnly = false,
+   ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+     writeSemaphore.withPermits(1)(
+       Effect.gen(function* () {
+@@ -1243,7 +1328,9 @@ const make = Effect.gen(function* () {
+               yield* rollbackSecretChanges;
+               return yield* Effect.failCause(materializedExit.cause);
+             }
+-            const writeExit = yield* Effect.exit(writeSettingsAtomically(next));
++            const writeExit = yield* Effect.exit(
++              persistFiles(next, current, patch, initiativeOnly),
++            );
+             if (Exit.isFailure(writeExit)) {
+               yield* rollbackSecretChanges;
+               return yield* Effect.failCause(writeExit.cause);
+@@ -1302,37 +1389,43 @@ const make = Effect.gen(function* () {
+     const revalidateAndEmitSafely = revalidateAndEmit.pipe(Effect.ignoreCause({ log: true }));
+ 
+     // Watch symlink targets' directories for rewrites; re-resolve link changes to follow repointing.
+-    const watchLinkTarget = Effect.gen(function* () {
+-      const linkTargetPath = yield* resolveSymlinkTarget(settingsPath).pipe(
+-        Effect.provideService(FileSystem.FileSystem, fs),
+-        Effect.provideService(Path.Path, pathService),
+-      );
+-      if (linkTargetPath === pathService.resolve(settingsPath)) {
+-        return Option.none<string>();
+-      }
+-      yield* fs
+-        .makeDirectory(pathService.dirname(linkTargetPath), { recursive: true })
+-        .pipe(Effect.ignore({ log: true }));
+-      return Option.some(linkTargetPath);
+-    }).pipe(Effect.orElseSucceed(() => Option.none<string>()));
+-
+-    const initialLinkTarget = yield* watchLinkTarget;
+-    const linkTargetEvents = Stream.make(initialLinkTarget).pipe(
+-      Stream.concat(watchFileChanges(settingsPath).pipe(Stream.mapEffect(() => watchLinkTarget))),
+-      Stream.changes,
+-      Stream.switchMap(
+-        Option.match({
+-          onNone: () => Stream.empty,
+-          onSome: (linkTargetPath) =>
+-            watchFileChanges(linkTargetPath).pipe(Stream.ignore({ log: true })),
+-        }),
+-      ),
++    const watchLinkTarget = Effect.fn("serverSettings.watchLinkTarget")(
++      function* (filePath: string) {
++        const linkTargetPath = yield* resolveSymlinkTarget(filePath).pipe(
++          Effect.provideService(FileSystem.FileSystem, fs),
++          Effect.provideService(Path.Path, pathService),
++        );
++        if (linkTargetPath === pathService.resolve(filePath)) return Option.none<string>();
++        yield* fs
++          .makeDirectory(pathService.dirname(linkTargetPath), { recursive: true })
++          .pipe(Effect.ignore({ log: true }));
++        return Option.some(linkTargetPath);
++      },
++      Effect.orElseSucceed(() => Option.none<string>()),
+     );
+-
++    const watchSettingsFile = (filePath: string) =>
++      Stream.unwrap(
++        Effect.gen(function* () {
++          const initialLinkTarget = yield* watchLinkTarget(filePath);
++          const linkTargetEvents = Stream.make(initialLinkTarget).pipe(
++            Stream.concat(
++              watchFileChanges(filePath).pipe(Stream.mapEffect(() => watchLinkTarget(filePath))),
++            ),
++            Stream.changes,
++            Stream.switchMap(
++              Option.match({
++                onNone: () => Stream.empty,
++                onSome: (target) => watchFileChanges(target).pipe(Stream.ignore({ log: true })),
++              }),
++            ),
++          );
++          return Stream.merge(watchFileChanges(filePath), linkTargetEvents);
++        }),
++      );
+     // Saves emit multiple events; fs.watch may fire before content is flushed.
+     const debouncedSettingsEvents = Stream.merge(
+-      watchFileChanges(settingsPath),
+-      linkTargetEvents,
++      watchSettingsFile(settingsPath),
++      watchSettingsFile(initiativesPath),
+     ).pipe(Stream.debounce(Duration.millis(100)));
+ 
+     yield* Stream.runForEach(debouncedSettingsEvents, () => revalidateAndEmitSafely).pipe(
+@@ -1368,10 +1461,14 @@ const make = Effect.gen(function* () {
+     ready: Deferred.await(startedDeferred),
+     getSettings: getMaterializedSettings,
+     updateSettings: (patch) =>
+-      updateAndPersistSettings(patch, (current) =>
+-        ensureSecretProviderWritesAllowed(patch, settingsPath).pipe(
+-          Effect.as(applyServerSettingsPatch(current, patch)),
+-        ),
++      updateAndPersistSettings(
++        patch,
++        (current) =>
++          ensureSecretProviderWritesAllowed(patch, settingsPath).pipe(
++            Effect.as(applyServerSettingsPatch(current, patch)),
++          ),
++        patch.initiativeChange !== undefined &&
++          Object.keys(patch).every((key) => key === "initiativeChange"),
+       ),
+     updateProviderInstance: (mutation, patch = {}) =>
+       updateAndPersistSettings(patch, (current) =>
