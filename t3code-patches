@@ -1,0 +1,535 @@
+#!/usr/bin/env python3
+"""Build and load focused patches against the installed official T3 Code Beta."""
+# ASAR reading, public-config extraction and macOS overlay build adapted from
+# btsouth/t3code-customize, Copyright (c) 2026 Tyler South, MIT (see LICENSE).
+import argparse
+import contextlib
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import plistlib
+import re
+import shlex
+import shutil
+import socket
+import struct
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.request
+import uuid
+
+REPO = Path(__file__).resolve().parent
+DEFAULT_APP = Path('/Applications/T3 Code (Beta).app')
+DEFAULT_DATA = Path.home() / '.local/share/t3code-patches'
+DEFAULT_CACHE = Path.home() / '.cache/t3code-patches'
+UPSTREAM = 'https://github.com/pingdotgg/t3code.git'
+LABEL = 'com.kpurdon.t3code-patches.update'
+PREFIXES = ('apps/server/dist', 'apps/desktop/dist-electron')
+PUBLIC_CONFIG = {
+    'VITE_CLERK_PUBLISHABLE_KEY': 'T3CODE_CLERK_PUBLISHABLE_KEY',
+    'VITE_CLERK_JWT_TEMPLATE': 'T3CODE_CLERK_JWT_TEMPLATE',
+    'VITE_CLERK_CLI_OAUTH_CLIENT_ID': 'T3CODE_CLERK_CLI_OAUTH_CLIENT_ID',
+    'VITE_T3CODE_RELAY_URL': 'T3CODE_RELAY_URL',
+}
+
+
+class Stop(Exception):
+    pass
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with Path(path).open('rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def read_json(path):
+    return json.loads(Path(path).read_text())
+
+
+def atomic_json(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+    temporary.write_text(json.dumps(value, indent=2) + '\n')
+    os.replace(temporary, path)
+
+
+def run(argv, *, cwd=None, env=None, capture=False):
+    result = subprocess.run(list(map(str, argv)), cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                            text=True, stdout=subprocess.PIPE if capture else None, check=False)
+    if result.returncode:
+        raise Stop(f'Command failed ({result.returncode}): {shlex.join(list(map(str, argv)))}')
+    return result.stdout.strip() if capture else result
+
+
+class Archive:
+    def __init__(self, path):
+        self.file = Path(path).open('rb')
+        try:
+            _, header_size, _, json_size = struct.unpack('<4I', self.file.read(16))
+            self.offset = 8 + header_size
+            self.tree = json.loads(self.file.read(json_size))
+        except BaseException:
+            self.file.close()
+            raise
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.file.close()
+
+    @staticmethod
+    def walk(tree, prefix=''):
+        for name, entry in tree.get('files', {}).items():
+            if 'files' in entry:
+                yield from Archive.walk(entry, prefix + name + '/')
+            else:
+                yield prefix + name, entry
+
+    def read(self, key):
+        entry = dict(self.walk(self.tree))[key]
+        if entry.get('unpacked') or 'link' in entry:
+            raise Stop('Expected a packed ASAR file: ' + key)
+        self.file.seek(self.offset + int(entry['offset']))
+        data = self.file.read(entry['size'])
+        if len(data) != entry['size']:
+            raise Stop('Truncated ASAR entry: ' + key)
+        return data
+
+    def scripts(self, prefix):
+        for key, entry in self.walk(self.tree):
+            if key.startswith(prefix) and key.endswith(('.js', '.mjs', '.cjs')) and not entry.get('unpacked') and 'link' not in entry:
+                yield key, self.read(key)
+
+
+def electron_fuses(app):
+    # Electron's fuse wire lives in the signed framework, not the launcher executable.
+    names = ['RunAsNode', 'EnableCookieEncryption', 'EnableNodeOptionsEnvironmentVariable',
+             'EnableNodeCliInspectArguments', 'EnableEmbeddedAsarIntegrityValidation', 'OnlyLoadAppFromAsar',
+             'LoadBrowserProcessSpecificV8Snapshot', 'GrantFileProtocolExtraPrivileges']
+    framework = Path(app) / 'Contents/Frameworks/Electron Framework.framework/Electron Framework'
+    data = framework.read_bytes()
+    start = data.find(b'dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX')
+    if start < 0 or len(data) < start + 34:
+        return {}
+    start += 32
+    if data[start] != 1:
+        return {}
+    length = data[start + 1]
+    wire = data[start + 2:start + 2 + length]
+    if len(wire) != length:
+        return {}
+    return dict(zip(names, wire.decode('ascii', 'replace')))
+
+
+def inspect_app(app):
+    app = Path(app).expanduser().resolve()
+    resources = app / 'Contents/Resources'
+    if (resources / 'server.asar').exists():
+        raise Stop('This loader requires Beta with the combined app.asar archive.')
+    try:
+        with (app / 'Contents/Info.plist').open('rb') as f:
+            info = plistlib.load(f)
+        executable = app / 'Contents/MacOS' / info['CFBundleExecutable']
+        with Archive(resources / 'app.asar') as archive:
+            package = json.loads(archive.read('package.json'))
+        fuses = electron_fuses(app)
+    except (OSError, ValueError, KeyError, struct.error) as e:
+        raise Stop(f'Could not inspect installed Beta: {app}: {e}') from e
+    version, commit = package.get('version', ''), package.get('t3codeCommitHash', '')
+    if not re.fullmatch(r'\d+\.\d+\.\d+(?:-beta[.\w-]*)?', version):
+        raise Stop(f'Expected official Beta, got version {version!r}.')
+    if not re.fullmatch(r'[0-9a-f]{7,40}', commit):
+        raise Stop('The installed Beta does not record its exact source commit.')
+    for required in ('EnableNodeCliInspectArguments', 'RunAsNode'):
+        if fuses.get(required) != '1':
+            raise Stop(f'This Beta does not support {required}; refusing to start it without isolated customization.')
+    framework = app / 'Contents/Frameworks/Electron Framework.framework/Electron Framework'
+    return {'app': str(app), 'executable': str(executable), 'version': version, 'commit': commit,
+            'asarSha256': sha256(resources / 'app.asar'), 'executableSha256': sha256(executable),
+            'frameworkSha256': sha256(framework), 'electronFuses': fuses}
+
+
+def public_config(archive):
+    found = {}
+    for _, content in archive.scripts('apps/server/dist/client/'):
+        for name, target in PUBLIC_CONFIG.items():
+            match = re.search(re.escape(name).encode() + rb':\s*([`"\'])([^`"\'\\\n]{1,200})\1', content)
+            if match:
+                found[target] = match.group(2).decode()
+    return found
+
+
+def validate_checks(raw):
+    commands = raw.get('commands')
+    if not isinstance(commands, list) or not commands:
+        raise Stop('checks.json must specify focused validation commands.')
+    for command in commands:
+        argv = command.get('argv') if isinstance(command, dict) else None
+        cwd = command.get('cwd', '.') if isinstance(command, dict) else None
+        if not isinstance(argv, list) or not argv or not all(isinstance(x, str) and x for x in argv):
+            raise Stop('Each check needs a nonempty argv array; shell commands are not accepted.')
+        if not isinstance(cwd, str) or Path(cwd).is_absolute() or '..' in Path(cwd).parts:
+            raise Stop('Check working directories must stay inside the source checkout.')
+    markers = raw.get('markers', {})
+    if not isinstance(markers, dict) or not all(isinstance(k, str) and k.startswith(PREFIXES) and
+            isinstance(v, list) and v and all(isinstance(x, str) and x for x in v) for k, v in markers.items()):
+        raise Stop('Bundle markers must name build prefixes and nonempty string arrays.')
+    return raw
+
+
+def recipe_hash():
+    files = [REPO / 't3code-patches', REPO / 'checks.json', *sorted((REPO / 'patches').glob('*.patch')),
+             *sorted((REPO / 'macos').glob('*'))]
+    h = hashlib.sha256()
+    for path in files:
+        if path.is_file():
+            h.update(str(path.relative_to(REPO)).encode() + b'\0' + path.read_bytes())
+    return h.hexdigest()
+
+
+def clean_env(node_bin=None):
+    env = {k: v for k, v in os.environ.items() if not k.startswith(('T3CODE_', 'VITE_', 'EXPO_PUBLIC_'))}
+    for name in ('ELECTRON_RUN_AS_NODE', 'ELECTRON_NO_ASAR', 'NODE_OPTIONS', 'NODE_ENV'):
+        env.pop(name, None)
+    if node_bin:
+        env['PATH'] = str(node_bin) + os.pathsep + env.get('PATH', '')
+    env['COREPACK_ENABLE_DOWNLOAD_PROMPT'] = '0'
+    return env
+
+
+def extract_node(archive, destination):
+    # Python 3.9 lacks tarfile's data filter; validate normal and link targets there.
+    if getattr(tarfile, 'data_filter', None):
+        archive.extractall(destination, filter='data')
+        return
+    root = destination.resolve()
+    for member in archive.getmembers():
+        target = (destination / member.name).resolve()
+        linked = (target.parent / member.linkname).resolve() if member.issym() else (destination / member.linkname).resolve()
+        if not target.is_relative_to(root) or ((member.issym() or member.islnk()) and not linked.is_relative_to(root)):
+            raise Stop('Unsafe Node archive entry.')
+        if member.isdev() or member.isfifo():
+            raise Stop('Unexpected device entry in Node archive.')
+    archive.extractall(destination, **({'filter': 'fully_trusted'} if hasattr(tarfile, 'fully_trusted_filter') else {}))
+
+
+def ensure_node(version, cache):
+    if not re.fullmatch(r'\d+\.\d+\.\d+', version):
+        raise Stop('Expected an exact Node version in upstream package.json engines.node.')
+    current = shutil.which('node')
+    if current and run([current, '-p', 'process.versions.node'], capture=True) == version:
+        return Path(current).parent
+    arch = run(['uname', '-m'], capture=True)
+    if arch not in ('arm64', 'x86_64'):
+        raise Stop('Unsupported macOS architecture: ' + arch)
+    target = f'node-v{version}-darwin-{"arm64" if arch == "arm64" else "x64"}'
+    folder = cache / 'node' / target
+    if (folder / 'bin/node').is_file():
+        return folder / 'bin'
+    base = f'https://nodejs.org/dist/v{version}/'
+    name = target + '.tar.gz'
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    with urllib.request.urlopen(base + 'SHASUMS256.txt', timeout=30) as response:
+        sums = {line.split()[-1]: line.split()[0] for line in response.read().decode().splitlines() if line.strip()}
+    download = folder.parent / name
+    with urllib.request.urlopen(base + name, timeout=60) as response, download.open('wb') as output:
+        shutil.copyfileobj(response, output)
+    if sha256(download) != sums.get(name):
+        raise Stop('Node download did not match the published SHA256.')
+    with tarfile.open(download) as archive:
+        extract_node(archive, folder.parent)
+    download.unlink()
+    return folder / 'bin'
+
+
+@contextlib.contextmanager
+def source_checkout(cache, commit, version):
+    gitdir = cache / 'source.git'
+    if not gitdir.exists():
+        run(['git', 'clone', '--bare', '--filter=blob:none', UPSTREAM, gitdir])
+    if subprocess.run(['git', '--git-dir', str(gitdir), 'cat-file', '-e', commit + '^{commit}'],
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
+        run(['git', '--git-dir', gitdir, 'fetch', 'origin', 'tag', 'v' + version])
+    resolved = run(['git', '--git-dir', gitdir, 'rev-parse', '--verify', commit + '^{commit}'], capture=True)
+    if not re.fullmatch(r'[0-9a-f]{40}', resolved) or not resolved.startswith(commit):
+        raise Stop('Recorded source revision did not resolve uniquely.')
+    path = cache / ('work-' + uuid.uuid4().hex)
+    run(['git', '-c', 'core.hooksPath=' + os.devnull, '--git-dir', gitdir, 'worktree', 'add', '--detach', path, resolved])
+    try:
+        yield path
+    finally:
+        run(['git', '--git-dir', gitdir, 'worktree', 'remove', '--force', path])
+
+
+def verify_overlay(overlay, stock, checks, config):
+    for required in ('apps/server/dist/bin.mjs', 'apps/server/dist/client/index.html',
+                     'apps/desktop/dist-electron/boot.cjs', 'apps/desktop/dist-electron/main.cjs'):
+        if not (overlay / required).is_file():
+            raise Stop('Build output missing ' + required)
+    if stock.read('apps/desktop/dist-electron/boot.cjs') != (overlay / 'apps/desktop/dist-electron/boot.cjs').read_bytes():
+        raise Stop('Desktop boot code changed; loading into the signed Beta is unsafe.')
+    for prefix in PREFIXES:
+        data = b''.join(p.read_bytes() for p in (overlay / prefix).rglob('*') if p.is_file())
+        if prefix.endswith('dist-electron') and b'T3CODE_PROFILE_DIRECTORY' not in data:
+            raise Stop('The feature patch must support T3CODE_PROFILE_DIRECTORY for isolated Chromium data.')
+        for value in config.values():
+            old = b''.join(content for _, content in stock.scripts(prefix + '/') if '/client/' not in _)
+            if value.encode() in old and value.encode() not in data:
+                raise Stop('Build lost official T3 Connect configuration.')
+    for prefix, markers in checks.get('markers', {}).items():
+        content = b''.join(p.read_bytes() for p in (overlay / prefix).rglob('*') if p.is_file())
+        if any(marker.encode() not in content for marker in markers):
+            raise Stop('Build is missing a required feature marker under ' + prefix)
+    old_client = b''.join(content for _, content in stock.scripts('apps/server/dist/client/'))
+    new_client = b''.join(p.read_bytes() for p in (overlay / 'apps/server/dist/client').rglob('*') if p.is_file())
+    if any(v.encode() in old_client and v.encode() not in new_client for v in config.values()):
+        raise Stop('Web build lost official T3 Connect configuration.')
+
+
+def build(args):
+    app = inspect_app(args.app)
+    data, cache = Path(args.data_dir).expanduser().resolve(), Path(args.cache_dir).expanduser().resolve()
+    data.mkdir(parents=True, exist_ok=True)
+    cache.mkdir(parents=True, exist_ok=True)
+    with (cache / 'build.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        recipe = recipe_hash()
+        current_path = data / 'current.json'
+        if current_path.exists():
+            current = read_json(current_path)
+            if current['app'] == app and current['recipe'] == recipe:
+                validate_artifact(data, current)
+                print('Patched Beta build is current.', flush=True)
+                return
+        patches = sorted((REPO / 'patches').glob('*.patch'))
+        if not patches:
+            raise Stop('No feature patches found in patches/.')
+        checks = validate_checks(read_json(REPO / 'checks.json'))
+        build_id = app['version'] + '-' + recipe[:12] + '-' + uuid.uuid4().hex[:8]
+        staging = data / 'builds' / ('.staging-' + build_id)
+        staging.mkdir(parents=True)
+        try:
+            run(['codesign', '--verify', '--deep', '--strict', app['app']])
+            with source_checkout(cache, app['commit'], app['version']) as source:
+                source_commit = run(['git', 'rev-parse', 'HEAD'], cwd=source, capture=True)
+                for patch in patches:
+                    run(['git', '-c', 'core.hooksPath=' + os.devnull, 'apply', '--check', patch], cwd=source)
+                    run(['git', '-c', 'core.hooksPath=' + os.devnull, 'apply', '--index', patch], cwd=source)
+                package = read_json(source / 'package.json')
+                env = clean_env(ensure_node(package['engines']['node'], cache))
+                manager = package['packageManager'].split('+')[0]
+                if not re.fullmatch(r'pnpm@\d+\.\d+\.\d+', manager):
+                    raise Stop('Expected an exact upstream pnpm version.')
+                run(['npx', '--yes', manager, 'install', '--frozen-lockfile', '--ignore-scripts'], cwd=source, env=env)
+                env['PATH'] = str(source / 'node_modules/.bin') + os.pathsep + env['PATH']
+                check_env = {**env, 'T3CODE_HOME': str(cache / 'test-t3'),
+                             'T3CODE_PROFILE_DIRECTORY': str(cache / 'test-electron'),
+                             'PLAYWRIGHT_BROWSERS_PATH': str(cache / 'ms-playwright')}
+                for command in checks['commands']:
+                    cwd = source / command.get('cwd', '.')
+                    command_env = {**check_env, 'PATH': str(cwd / 'node_modules/.bin') + os.pathsep + env['PATH']}
+                    run(command['argv'], cwd=cwd, env=command_env)
+                with Archive(Path(app['app']) / 'Contents/Resources/app.asar') as stock:
+                    config = public_config(stock)
+                env.update(config)
+                env['APP_VERSION'] = app['version']
+                env['TMPDIR'] = str(cache / 'tmp')
+                Path(env['TMPDIR']).mkdir(exist_ok=True)
+                for name in ('web', 'server', 'desktop'):
+                    p = source / 'apps' / name / 'package.json'
+                    value = read_json(p)
+                    value['version'] = app['version']
+                    p.write_text(json.dumps(value, indent=2) + '\n')
+                run(['vp', 'build'], cwd=source / 'apps/web', env=env)
+                run(['node', 'scripts/cli.ts', 'build'], cwd=source / 'apps/server', env=env)
+                run(['node', 'scripts/apply-web-brand-assets.ts', 'production', 'apps/server/dist/client'], cwd=source, env=env)
+                helper = source / 'native/browser-secret/build' / ('arm64' if os.uname().machine == 'arm64' else 'x64') / 't3-browser-secret'
+                stock_helper = Path(app['app']) / 'Contents/Resources/browser-secret/t3-browser-secret'
+                if stock_helper.exists():
+                    helper.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(stock_helper, helper)
+                for script in ('build-browser-secret.mjs', 'build-preview-annotation-css.mjs'):
+                    run(['node', 'scripts/' + script], cwd=source / 'apps/desktop', env=env)
+                run(['vp', 'pack'], cwd=source / 'apps/desktop', env=env)
+                overlay = staging / 'overlay'
+                for prefix in PREFIXES:
+                    if any(p.is_symlink() for p in (source / prefix).rglob('*')):
+                        raise Stop('Build output contains symlinks.')
+                    shutil.copytree(source / prefix, overlay / prefix)
+                with Archive(Path(app['app']) / 'Contents/Resources/app.asar') as stock:
+                    verify_overlay(overlay, stock, checks, config)
+                for path in (REPO / 'macos').glob('*'):
+                    if path.is_file():
+                        shutil.copy2(path, staging / path.name)
+            if inspect_app(args.app) != app:
+                raise Stop('Official Beta changed during the build; no artifact was activated.')
+            hashes = {str(p.relative_to(staging)): sha256(p) for p in staging.rglob('*') if p.is_file()}
+            manifest = {'schema': 1, 'build': build_id, 'app': app, 'sourceCommit': source_commit, 'recipe': recipe, 'hashes': hashes}
+            destination = staging.with_name(build_id)
+            os.replace(staging, destination)
+            atomic_json(current_path, manifest)
+            print('Staged patched Beta ' + app['version'] + '. Existing sessions were not restarted.', flush=True)
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging)
+
+
+def validate_artifact(data, manifest):
+    if manifest.get('schema') != 1 or not re.fullmatch(r'[\w.-]+', manifest.get('build', '')):
+        raise Stop('Invalid staged build manifest.')
+    folder = Path(data) / 'builds' / manifest['build']
+    required = {'connect.mjs', 'inject.cjs', 'overlay/apps/server/dist/bin.mjs',
+                'overlay/apps/server/dist/client/index.html', 'overlay/apps/desktop/dist-electron/boot.cjs',
+                'overlay/apps/desktop/dist-electron/main.cjs'}
+    if not folder.resolve().is_relative_to((Path(data) / 'builds').resolve()):
+        raise Stop('Staged build resolves outside the artifact directory.')
+    if any(p.is_symlink() for p in folder.rglob('*')):
+        raise Stop('Staged builds cannot contain symlinks.')
+    files = {str(p.relative_to(folder)) for p in folder.rglob('*') if p.is_file()}
+    if not isinstance(manifest.get('hashes'), dict) or set(manifest['hashes']) != files or not required.issubset(files):
+        raise Stop('Staged build file inventory is incomplete or changed.')
+    for name, digest in manifest['hashes'].items():
+        path = folder / name
+        if not path.resolve().is_relative_to(folder.resolve()) or not path.is_file() or sha256(path) != digest:
+            raise Stop('Staged build changed or is incomplete: ' + name)
+    if inspect_app(manifest['app']['app']) != manifest['app']:
+        raise Stop('Official Beta changed. Run update before launching the patched app.')
+    return folder
+
+
+def launch(args):
+    data = Path(args.data_dir).expanduser().resolve()
+    manifest = read_json(data / 'current.json')
+    folder = validate_artifact(data, manifest)
+    profile, t3home = data / 'electron', data / 't3'
+    for path in (profile, t3home):
+        path.mkdir(parents=True, exist_ok=True)
+    running = data / 'running.json'
+    if running.exists():
+        old = read_json(running)
+        result = subprocess.run(['ps', '-p', str(old['pid']), '-o', 'command='], capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip().startswith(manifest['app']['executable']) and str(profile) in result.stdout:
+            print('Patched Beta is already running; quit and reopen it to load the staged update.'
+                  if old.get('build') != manifest['build'] else 'Patched Beta is already running; select its existing window.')
+            return
+    env = clean_env()
+    env.update(T3CODE_HOME=str(t3home), T3CODE_PROFILE_DIRECTORY=str(profile), T3CODE_DISABLE_AUTO_UPDATE='true')
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+        port = probe.getsockname()[1]
+    with (data / 'runtime.log').open('a') as log:
+        if inspect_app(manifest['app']['app']) != manifest['app']:
+            raise Stop('Official Beta changed before launch; refusing to start it.')
+        child = subprocess.Popen([manifest['app']['executable'], f'--inspect-brk=127.0.0.1:{port}',
+                                  '--user-data-dir=' + str(profile)], env=env, stdout=log, stderr=log,
+                                 start_new_session=True)
+        atomic_json(running, {'pid': child.pid, 'build': manifest['build']})
+        try:
+            result = subprocess.run([manifest['app']['executable'], str(folder / 'connect.mjs'), str(port),
+                                     str(folder / 'inject.cjs'), str(folder / 'overlay'), str(child.pid)],
+                                    env={**env, 'ELECTRON_RUN_AS_NODE': '1'}, stdout=log, stderr=log, timeout=45)
+            if result.returncode:
+                raise Stop('Customization did not load; see ' + str(data / 'runtime.log'))
+        except BaseException:
+            if child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=5)
+            raise
+    print('Opened patched Beta with isolated data.')
+
+
+def autoupdate(args):
+    domain = f'gui/{os.getuid()}'
+    service = domain + '/' + LABEL
+    plist = Path.home() / 'Library/LaunchAgents' / (LABEL + '.plist')
+    if args.state == 'off':
+        subprocess.run(['launchctl', 'bootout', service], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        plist.unlink(missing_ok=True)
+        print('Background patch builds disabled.')
+        return
+    data = Path(args.data_dir).expanduser().resolve()
+    data.mkdir(parents=True, exist_ok=True)
+    app = Path(args.app).expanduser().resolve()
+    plist.parent.mkdir(parents=True, exist_ok=True)
+    config = {'Label': LABEL, 'ProgramArguments': [sys.executable, str(REPO / 't3code-patches'),
+              '--app', str(app), '--data-dir', str(data), '--cache-dir', str(Path(args.cache_dir).expanduser().resolve()), 'update'],
+              'RunAtLoad': True, 'StartInterval': 3600, 'ThrottleInterval': 120,
+              'WatchPaths': [str(app / 'Contents/Info.plist'), str(app / 'Contents/Resources/app.asar')],
+              'EnvironmentVariables': {'PATH': os.environ.get('PATH', '/usr/bin:/bin')},
+              'StandardOutPath': str(data / 'update.log'), 'StandardErrorPath': str(data / 'update.log'),
+              'LowPriorityIO': True, 'Nice': 10, 'ProcessType': 'Interactive'}
+    with plist.open('wb') as f:
+        plistlib.dump(config, f)
+    subprocess.run(['launchctl', 'bootout', service], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run(['launchctl', 'enable', service])
+    run(['launchctl', 'bootstrap', domain, plist])
+    print('Hourly patch builds enabled; updates never launch or stop T3 sessions.')
+
+
+def install_launcher(args):
+    app = Path.home() / 'Applications/T3 Code (Patched Beta).app'
+    contents = app / 'Contents'
+    (contents / 'MacOS').mkdir(parents=True, exist_ok=True)
+    (contents / 'Resources').mkdir(exist_ok=True)
+    with (contents / 'Info.plist').open('wb') as f:
+        plistlib.dump({'CFBundleName': 'T3 Code (Patched Beta)', 'CFBundleDisplayName': 'T3 Code (Patched Beta)',
+                      'CFBundleIdentifier': 'com.kpurdon.t3code-patches', 'CFBundleExecutable': 'launch',
+                      'CFBundlePackageType': 'APPL', 'CFBundleVersion': '1', 'LSUIElement': True}, f)
+    command = [sys.executable, str(REPO / 't3code-patches'), '--data-dir', str(Path(args.data_dir).expanduser().resolve()), 'launch']
+    script = contents / 'MacOS/launch'
+    script.write_text('#!/bin/sh\nexec ' + shlex.join(command) + '\n')
+    script.chmod(0o755)
+    print('Installed launcher: ' + str(app))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--app', default=str(DEFAULT_APP))
+    parser.add_argument('--data-dir', default=str(DEFAULT_DATA))
+    parser.add_argument('--cache-dir', default=str(DEFAULT_CACHE))
+    sub = parser.add_subparsers(dest='command', required=True)
+    for name in ('build', 'update', 'status', 'launch', 'install-launcher'):
+        sub.add_parser(name)
+    auto = sub.add_parser('autoupdate')
+    auto.add_argument('state', choices=('on', 'off'))
+    args = parser.parse_args()
+    if sys.platform != 'darwin':
+        raise Stop('The signed-app overlay launcher currently supports macOS only.')
+    if args.command in ('build', 'update'):
+        build(args)
+    elif args.command == 'launch':
+        launch(args)
+    elif args.command == 'autoupdate':
+        autoupdate(args)
+    elif args.command == 'install-launcher':
+        install_launcher(args)
+    else:
+        current = Path(args.data_dir).expanduser() / 'current.json'
+        if not current.exists():
+            print('No patched Beta build is staged. Run build.')
+        else:
+            value = read_json(current)
+            validate_artifact(Path(args.data_dir).expanduser(), value)
+            print(f"Ready: Beta {value['app']['version']}, source {value['app']['commit'][:12]}, patch {value['recipe'][:12]}")
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (Stop, OSError, ValueError, KeyError) as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(1)
