@@ -581,20 +581,20 @@ index 0000000000..c1f6ef814c
 +  expect(JSON.parse(localStorage.getItem("t3code:initiatives:collapsed")!)).toEqual([]);
 +});
 diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
-index 2cd1fec66a..447862eca3 100644
+index 2cd1fec66a..5b48a613a0 100644
 --- a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 +++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 @@ -113,6 +113,8 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
    const router = getRouter(createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${a.id}`] }));
    await router.load();
    await using _app = await render(<AppRoot router={router} />, { router: false });
-+  await expect.element(page.getByTestId("sidebar-other-sessions")).toBeVisible();
++  await expect.element(page.getByTestId("sidebar-ungrouped-threads")).toBeVisible();
 +  await expect.element(row(flat.title)).toHaveAttribute("data-testid", "sidebar-row-slim");
    await expect.element(row(b.title)).toBeVisible();
    await expect
      .element(page.getByTestId("sidebar-settled-shelf-toggle"))
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index 60a689e0cb..654dcda7d9 100644
+index 60a689e0cb..94af06d445 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
 @@ -1,4 +1,6 @@
@@ -791,7 +791,7 @@ index 60a689e0cb..654dcda7d9 100644
                                <SidebarSectionPlaceholder
                                  key="settled-placeholder"
                                  marker="settled-placeholder"
-@@ -3642,31 +3668,54 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3642,31 +3668,48 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              break;
                          }
                        }
@@ -824,16 +824,10 @@ index 60a689e0cb..654dcda7d9 100644
 +                        items.push(
 +                          <li
 +                            key="other-sessions"
-+                            data-testid="sidebar-other-sessions"
++                            data-testid="sidebar-ungrouped-threads"
 +                            className="mt-3 list-none rounded-lg border border-sidebar-border"
 +                          >
-+                            <div className="flex items-center justify-between rounded-t-lg border-b border-sidebar-border bg-sidebar-control-surface px-3 py-2 text-sm font-medium">
-+                              <h2>Other sessions</h2>
-+                              <span className="text-xs text-sidebar-muted-foreground">
-+                                {otherSessionCount}
-+                              </span>
-+                            </div>
-+                            <ul aria-label="Other sessions" className="p-1">
++                            <ul aria-label="Threads outside initiatives" className="p-1">
 +                              {looseItems}
 +                            </ul>
 +                          </li>,
@@ -869,7 +863,7 @@ index 60a689e0cb..654dcda7d9 100644
                    </ul>
                  </SortableContext>
                </DndContext>
-@@ -3706,6 +3755,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3706,6 +3749,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
            ) : null}
          </SidebarGroup>
        </SidebarContent>
@@ -1110,10 +1104,10 @@ index a70755d002..a3571e5cb2 100644
    globalThis.fetch = async (input, init) => {
      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
 diff --git a/scripts/scenarios/initiative-save.e2e.ts b/scripts/scenarios/initiative-save.e2e.ts
-index 19b445a163..15de757e31 100644
+index 19b445a163..b54598b6bc 100644
 --- a/scripts/scenarios/initiative-save.e2e.ts
 +++ b/scripts/scenarios/initiative-save.e2e.ts
-@@ -25,5 +25,35 @@ test(
+@@ -25,5 +25,37 @@ test(
      ).toBeVisible();
      await app.screenshot("initiative-saved");
      await expect(screen.getByText("No threads yet", { exact: true })).toBeHidden();
@@ -1144,8 +1138,10 @@ index 19b445a163..15de757e31 100644
 +  await screen.getByRole("menuitem", "Manage initiative", { exact: true }).tap();
 +  await screen.getByRole("checkbox", "New thread", { exact: true }).uncheck();
 +  await screen.getByRole("button", "Save").tap();
-+  await expect(screen.getByText("Other sessions", { exact: true })).toBeVisible();
++  await expect(
++    screen.getByRole("list", "Threads outside initiatives", { exact: true }),
++  ).toBeVisible();
 +  await expect(screen.getByRole("button", { name: /New thread,/ })).toBeVisible();
 +  await expect(screen.getByRole("button", { name: /New thread,.*Preparing/ })).toBeHidden();
-+  await app.screenshot("initiative-other-sessions");
++  await app.screenshot("initiative-ungrouped-threads");
 +});
