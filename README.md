@@ -45,6 +45,16 @@ The loader requires Beta's `RunAsNode` and startup-inspector Electron fuses. It 
 
 A failed patch, check, or build leaves the prior artifact intact. Launch refuses an artifact for a different official Beta or modified bundle. Restart through the patched launcher after a successful update; there is no fallback that silently opens the stock app against shared data. Logs are local: `~/.local/share/t3code-patches/update.log` and `runtime.log`.
 
+## Stone theme
+
+`themes/stone.json` adapts Stone's warm gray terminal palette for the app: brighter text, distinct sage surfaces, blue selection and action colors, and richer status accents. The terminal background and foreground retain the original Stone values. Install it into the running patched environment with:
+
+```sh
+t3 theme set ./themes/stone.json --id stone
+```
+
+In Settings → Appearance, set Glass opacity to 100% for solid surfaces. Theme changes apply live and do not require rebuilding or restarting the app.
+
 ## Development
 
 Keep feature changes in the patch and their focused validation commands in `checks.json`. Tooling checks:
