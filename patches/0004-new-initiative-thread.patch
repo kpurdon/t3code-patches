@@ -37,11 +37,96 @@ index 2da2f6a319..ea36a795c6 100644
      <InitiativeSidebar
        threads={threads}
        groups={
+diff --git a/apps/web/src/components/InitiativeSidebar.logic.test.ts b/apps/web/src/components/InitiativeSidebar.logic.test.ts
+index ae2eab766f..9c8033494f 100644
+--- a/apps/web/src/components/InitiativeSidebar.logic.test.ts
++++ b/apps/web/src/components/InitiativeSidebar.logic.test.ts
+@@ -1,7 +1,12 @@
+ import { expect, it } from "vite-plus/test";
+ import { EnvironmentId, ProjectId, ThreadId, type Initiative } from "@t3tools/contracts";
+ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+-import { initiativeMembers, initiativeSummary, initiativeLayout } from "./InitiativeSidebar.logic";
++import {
++  initiativeMembers,
++  initiativeStatusCounts,
++  initiativeSummary,
++  initiativeLayout,
++} from "./InitiativeSidebar.logic";
+ it("keeps the coordinator first and accounts for every member including unloaded sessions", () => {
+   const id = (value: string) => ThreadId.make(value);
+   const group: Initiative = {
+@@ -16,6 +21,14 @@ it("keeps the coordinator first and accounts for every member including unloaded
+     ["api", shell({ runtime: { status: "running" } })],
+     ["ui", shell({ settledOverride: "settled" })],
+   ]);
++  expect(
++    initiativeStatusCounts(group, threads).map(({ status, count }) => [status, count]),
++  ).toEqual([
++    ["attention", 1],
++    ["working", 1],
++    ["ready", 1],
++    ["unloaded", 1],
++  ]);
+   expect(initiativeSummary(group, threads)).toBe(
+     "1 needs you · 1 working · 1 idle or done · 1 not loaded",
+   );
+diff --git a/apps/web/src/components/InitiativeSidebar.logic.ts b/apps/web/src/components/InitiativeSidebar.logic.ts
+index 2f725aade2..1ddc9811b8 100644
+--- a/apps/web/src/components/InitiativeSidebar.logic.ts
++++ b/apps/web/src/components/InitiativeSidebar.logic.ts
+@@ -11,10 +11,10 @@ export function initiativeMembers(group: Initiative): readonly ThreadId[] {
+   ];
+ }
+ 
+-export function initiativeSummary(
++export function initiativeStatusCounts(
+   group: Initiative,
+   threads: ReadonlyMap<string, EnvironmentThreadShell>,
+-): string {
++) {
+   const counts = { working: 0, attention: 0, failed: 0, waiting: 0, ready: 0, unloaded: 0 };
+   for (const id of initiativeMembers(group)) {
+     const thread = threads.get(id);
+@@ -31,15 +31,25 @@ export function initiativeSummary(
+   }
+   return (
+     [
+-      [counts.attention, "needs you"],
+-      [counts.failed, "failed"],
+-      [counts.working, "working"],
+-      [counts.waiting, "waiting"],
+-      [counts.ready, "idle or done"],
+-      [counts.unloaded, "not loaded"],
+-    ]
+-      .filter(([count]) => count !== 0)
+-      .map(([count, label]) => `${count} ${label}`)
++      { status: "attention", label: "needs you" },
++      { status: "failed", label: "failed" },
++      { status: "working", label: "working" },
++      { status: "waiting", label: "waiting" },
++      { status: "ready", label: "idle or done" },
++      { status: "unloaded", label: "not loaded" },
++    ] as const
++  )
++    .map((item) => ({ ...item, count: counts[item.status] }))
++    .filter((item) => item.count > 0);
++}
++
++export function initiativeSummary(
++  group: Initiative,
++  threads: ReadonlyMap<string, EnvironmentThreadShell>,
++): string {
++  return (
++    initiativeStatusCounts(group, threads)
++      .map(({ count, label }) => `${count} ${label}`)
+       .join(" · ") || "No sessions"
+   );
+ }
 diff --git a/apps/web/src/components/InitiativeSidebar.tsx b/apps/web/src/components/InitiativeSidebar.tsx
-index 49883665e0..2feb489a70 100644
+index 49883665e0..4f0c892418 100644
 --- a/apps/web/src/components/InitiativeSidebar.tsx
 +++ b/apps/web/src/components/InitiativeSidebar.tsx
-@@ -5,15 +5,13 @@ import {
+@@ -5,18 +5,17 @@ import {
    useInitiativeEditor,
    type InitiativeEditorTarget,
  } from "./initiativeEditor";
@@ -58,7 +143,31 @@ index 49883665e0..2feb489a70 100644
  import { useUpdateEnvironmentSettings } from "../hooks/useSettings";
  import { useLocalStorage } from "../hooks/useLocalStorage";
  import { Button } from "./ui/button";
-@@ -45,6 +43,7 @@ interface Props {
++import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
+ import { Input } from "./ui/input";
+ import {
+   Dialog,
+@@ -31,10 +30,19 @@ import { Menu, MenuTrigger, MenuPopup, MenuItem } from "./ui/menu";
+ import {
+   initiativeMembers,
+   initiativeSummary,
++  initiativeStatusCounts,
+   type InitiativeSidebarGroup,
+ } from "./InitiativeSidebar.logic";
+ 
+ const collapsedSchema = Schema.Array(Schema.String);
++const statusColors = {
++  attention: "text-warning-foreground",
++  failed: "text-error-foreground",
++  working: "text-info-foreground",
++  waiting: "text-warning-foreground",
++  ready: "text-sidebar-muted-foreground",
++  unloaded: "text-sidebar-muted-foreground",
++};
+ 
+ type GroupRef = InitiativeEditorTarget;
+ interface Props {
+@@ -45,6 +53,7 @@ interface Props {
      parent: string,
      initiative?: { coordinator: boolean; hasChildren: boolean },
    ) => ReactNode;
@@ -66,7 +175,7 @@ index 49883665e0..2feb489a70 100644
    onOpen: (environmentId: EnvironmentId, threadId: ThreadId) => void;
  }
  
-@@ -200,6 +199,7 @@ function InitiativeGroup({
+@@ -200,6 +209,7 @@ function InitiativeGroup({
    renderThread,
    onOpen,
    onManage,
@@ -74,7 +183,86 @@ index 49883665e0..2feb489a70 100644
  }: Props & { target: InitiativeSidebarGroup; onManage: () => void }) {
    const update = useUpdateEnvironmentSettings(target.environmentId);
    const [collapsed, setCollapsed] = useLocalStorage(
-@@ -266,6 +266,7 @@ function InitiativeGroup({
+@@ -225,6 +235,8 @@ function InitiativeGroup({
+       for (const release of releases) release();
+     };
+   }, [target.environmentId, membersKey]);
++  const summary = initiativeSummary(target.displayed, byId);
++  const statusCounts = initiativeStatusCounts(target.displayed, byId);
+   if (target.hidden) return null;
+   return (
+     <li
+@@ -232,27 +244,49 @@ function InitiativeGroup({
+       data-initiative={target.id}
+     >
+       <div
+-        className={`flex items-center gap-1 bg-sidebar-control-surface px-3 py-2 ${closed ? "rounded-lg" : "rounded-t-lg"}`}
++        className={`flex items-center gap-1 bg-sidebar-control-surface px-3 py-1 ${closed ? "rounded-lg" : "rounded-t-lg"}`}
+       >
+-        <button
+-          type="button"
+-          data-sidebar-row={key}
+-          aria-expanded={!closed}
+-          className="min-w-0 flex-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+-          onClick={() =>
+-            setCollapsed((current) =>
+-              closed ? current.filter((item) => item !== key) : [...current, key],
+-            )
+-          }
+-        >
+-          <span className="flex items-center gap-2 text-sm font-medium">
+-            <ChevronDownIcon className={closed ? "size-3 -rotate-90" : "size-3"} />
+-            {target.group.name}
+-          </span>
+-          <span className="block truncate pl-5 text-xs text-sidebar-muted-foreground">
+-            {initiativeSummary(target.displayed, byId)}
+-          </span>
+-        </button>
++        <Tooltip>
++          <TooltipTrigger
++            render={
++              <button
++                type="button"
++                data-sidebar-row={key}
++                aria-expanded={!closed}
++                aria-label={`${target.group.name}: ${summary}`}
++                className="min-w-0 flex-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
++                onClick={() =>
++                  setCollapsed((current) =>
++                    closed ? current.filter((item) => item !== key) : [...current, key],
++                  )
++                }
++              />
++            }
++          >
++            <span className="grid min-w-0 grid-cols-[auto_minmax(3rem,1fr)_minmax(0,auto)] items-center gap-2 text-sm font-medium">
++              <ChevronDownIcon
++                className={closed ? "size-3 shrink-0 -rotate-90" : "size-3 shrink-0"}
++              />
++              <span className="min-w-0 truncate">{target.group.name}</span>
++              <span
++                aria-hidden
++                className="flex min-w-0 items-center gap-1.5 overflow-x-auto text-xs tabular-nums [scrollbar-width:none]"
++              >
++                {statusCounts.map(({ status, count }) => (
++                  <span
++                    key={status}
++                    className={`shrink-0 whitespace-nowrap ${statusColors[status]}`}
++                  >
++                    {count}
++                  </span>
++                ))}
++              </span>
++            </span>
++          </TooltipTrigger>
++          <TooltipPopup>
++            {target.group.name}: {summary}
++          </TooltipPopup>
++        </Tooltip>
+         <Menu>
+           <MenuTrigger
+             render={
+@@ -266,6 +300,7 @@ function InitiativeGroup({
              <EllipsisIcon />
            </MenuTrigger>
            <MenuPopup>
@@ -82,7 +270,7 @@ index 49883665e0..2feb489a70 100644
              <MenuItem onClick={onManage}>Manage initiative</MenuItem>
              <MenuItem
                onClick={() => update({ initiativeChange: { action: "delete", id: target.id } })}
-@@ -319,34 +320,21 @@ function InitiativeGroup({
+@@ -319,34 +354,21 @@ function InitiativeGroup({
    );
  }
  
@@ -129,7 +317,7 @@ index 49883665e0..2feb489a70 100644
        {props.groups.map((target) => (
          <InitiativeGroup
            key={`${target.environmentId}:${target.id}`}
-@@ -355,14 +343,6 @@ export function InitiativeSidebar(props: Props) {
+@@ -355,14 +377,6 @@ export function InitiativeSidebar(props: Props) {
            onManage={() => openInitiativeEditor(target)}
          />
        ))}

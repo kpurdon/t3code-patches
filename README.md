@@ -6,7 +6,7 @@ The patch adds named, collapsible initiatives spanning repository projects in on
 
 The native `t3_initiative_list` and `t3_initiative_update` tools expose those same explicit relationships. New single and batch launches inherit their caller's display group; replaying a launch preserves subsequent moves and removals. A grouping failure returns `initiativeWarning` alongside the accepted launch, so repair the exact thread's display relationship rather than launching another one. UI groups do not adopt sessions into Builder or dispatcher's management registry.
 
-Grouping is stored in environment settings and shared across clients of that environment. Collapse is local to each browser profile. Project filters apply to the displayed members; hidden members stay recorded. Patched grouping controls appear only when the connected server advertises support. Mobile has no dedicated group UI in this patch.
+Grouping is stored in `initiatives.json` beside the environment’s `settings.json` and shared across clients. Existing settings-based groups migrate on first load. Collapse is local to each browser profile. Project filters apply to the displayed members; hidden members stay recorded. Patched grouping controls appear only when the connected server advertises support. Mobile has no dedicated group UI in this patch.
 
 ## Build
 
