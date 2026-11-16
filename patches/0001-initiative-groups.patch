@@ -1,0 +1,2173 @@
+diff --git a/apps/desktop/src/app/DesktopConfig.ts b/apps/desktop/src/app/DesktopConfig.ts
+index ef290904..f5e916ba 100644
+--- a/apps/desktop/src/app/DesktopConfig.ts
++++ b/apps/desktop/src/app/DesktopConfig.ts
+@@ -38,6 +38,7 @@ export const DesktopConfig = Config.all({
+   xdgConfigHome: trimmedString("XDG_CONFIG_HOME"),
+   xdgDataHome: trimmedString("XDG_DATA_HOME"),
+   t3Home: trimmedString("T3CODE_HOME"),
++  profileDirectory: trimmedString("T3CODE_PROFILE_DIRECTORY"),
+   devServerUrl: Config.URL("VITE_DEV_SERVER_URL").pipe(Config.option),
+   appUserModelIdOverride: trimmedString("T3CODE_DESKTOP_APP_USER_MODEL_ID"),
+   devRemoteT3ServerEntryPath: trimmedString("T3CODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH"),
+diff --git a/apps/desktop/src/app/DesktopEnvironment.ts b/apps/desktop/src/app/DesktopEnvironment.ts
+index d5fed4b2..366d9360 100644
+--- a/apps/desktop/src/app/DesktopEnvironment.ts
++++ b/apps/desktop/src/app/DesktopEnvironment.ts
+@@ -44,6 +44,7 @@ export class DesktopEnvironment extends Context.Service<
+     readonly resourcesPath: string;
+     readonly homeDirectory: string;
+     readonly appDataDirectory: string;
++    readonly profileDirectory: string | null;
+     readonly baseDir: string;
+     readonly stateDir: string;
+     readonly desktopSettingsPath: string;
+@@ -196,6 +197,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
+     resourcesPath,
+     homeDirectory,
+     appDataDirectory,
++    profileDirectory: Option.getOrNull(config.profileDirectory),
+     baseDir,
+     stateDir,
+     desktopSettingsPath: path.join(stateDir, "desktop-settings.json"),
+diff --git a/apps/desktop/src/app/DesktopUserData.test.ts b/apps/desktop/src/app/DesktopUserData.test.ts
+index 53e548bd..8f7bcc6b 100644
+--- a/apps/desktop/src/app/DesktopUserData.test.ts
++++ b/apps/desktop/src/app/DesktopUserData.test.ts
+@@ -138,3 +138,31 @@ it.effect("retries on the next launch when a GPU cache cannot be removed", () =>
+     assert.deepStrictEqual(writes, []);
+   }).pipe(Effect.provide(NodeServices.layer)),
+ );
++
++it.effect(
++  "uses an explicit absolute profile directory without reading the shared browser profile",
++  () =>
++    Effect.gen(function* () {
++      const fs = yield* FileSystem.FileSystem;
++      const path = yield* Path.Path;
++      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-patch-profile-" });
++      const profile = path.join(directory, "isolated");
++      assert.strictEqual(
++        yield* resolveUserDataPath({
++          appDataDirectory: directory,
++          profileDirectory: profile,
++          isDevelopment: false,
++          platform: "darwin",
++        }),
++        profile,
++      );
++      const rejected = yield* resolveUserDataPath({
++        appDataDirectory: directory,
++        profileDirectory: "relative",
++        isDevelopment: false,
++        platform: "darwin",
++      }).pipe(Effect.result);
++      assert.strictEqual(rejected._tag, "Failure");
++      assert.strictEqual(yield* fs.exists(path.join(directory, "t3code-v2")), false);
++    }).pipe(Effect.provide(NodeServices.layer)),
++);
+diff --git a/apps/desktop/src/app/DesktopUserData.ts b/apps/desktop/src/app/DesktopUserData.ts
+index 0124aa72..ecee6e90 100644
+--- a/apps/desktop/src/app/DesktopUserData.ts
++++ b/apps/desktop/src/app/DesktopUserData.ts
+@@ -34,11 +34,22 @@ export class DesktopUserDataInitializationError extends Schema.TaggedError<Deskt
+ export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPath")(
+   function* (input: {
+     readonly appDataDirectory: string;
++    readonly profileDirectory?: string | null;
+     readonly isDevelopment: boolean;
+     readonly platform: NodeJS.Platform;
+   }) {
+     const fs = yield* FileSystem.FileSystem;
+     const path = yield* Path.Path;
++    if (input.profileDirectory) {
++      if (!path.isAbsolute(input.profileDirectory))
++        return yield* new DesktopUserDataInitializationError({
++          operation: "inspect",
++          resourcePath: input.profileDirectory,
++          category: "profile directory must be absolute",
++          cause: new Error("Relative profile path refused"),
++        });
++      return input.profileDirectory;
++    }
+     const names = input.isDevelopment
+       ? { current: "t3code-dev", legacy: "T3 Code (Dev)" }
+       : { current: "t3code-v2", legacy: "T3 Code (Alpha)" };
+diff --git a/apps/server/src/initiatives.test.ts b/apps/server/src/initiatives.test.ts
+new file mode 100644
+index 00000000..cf304690
+--- /dev/null
++++ b/apps/server/src/initiatives.test.ts
+@@ -0,0 +1,79 @@
++import { assert, it } from "@effect/vitest";
++import * as Effect from "effect/Effect";
++import { ThreadId, ServerSettingsError } from "@t3tools/contracts";
++import { ServerSettingsService } from "./serverSettings.ts";
++import { inheritInitiative } from "./initiatives.ts";
++it.effect(
++  "inherits explicit membership across native launches without losing concurrent members",
++  () =>
++    Effect.gen(function* () {
++      const settings = yield* ServerSettingsService;
++      const pm = ThreadId.make("pm");
++      yield* settings.updateSettings({
++        initiativeChange: {
++          action: "create",
++          id: "routing",
++          name: "Routing",
++          coordinatorThreadId: pm,
++        },
++      });
++      const children = [ThreadId.make("api"), ThreadId.make("ui")];
++      const outcomes = yield* Effect.forEach(
++        children,
++        (id) => inheritInitiative(settings, pm, id),
++        { concurrency: "unbounded" },
++      );
++      assert.deepEqual(outcomes, [{ initiativeId: "routing" }, { initiativeId: "routing" }]);
++      assert.deepEqual(
++        new Set((yield* settings.getSettings).initiatives.routing?.memberThreadIds),
++        new Set([pm, ...children]),
++      );
++      yield* settings.updateSettings({
++        initiativeChange: {
++          action: "create",
++          id: "other",
++          name: "Other",
++          coordinatorThreadId: null,
++        },
++      });
++      yield* settings.updateSettings({
++        initiativeChange: { action: "assign", id: "other", threadId: children[0]! },
++      });
++      assert.deepEqual(yield* inheritInitiative(settings, pm, children[0]!), {
++        initiativeId: "other",
++      });
++      assert.deepEqual(
++        yield* inheritInitiative(settings, ThreadId.make("outside"), ThreadId.make("unmanaged")),
++        {},
++      );
++    }).pipe(Effect.provide(ServerSettingsService.layerTest())),
++);
++
++it.effect("reports a repairable display warning without rejecting an accepted launch", () =>
++  Effect.gen(function* () {
++    const settings = yield* ServerSettingsService;
++    const pm = ThreadId.make("pm");
++    yield* settings.updateSettings({
++      initiativeChange: {
++        action: "create",
++        id: "routing",
++        name: "Routing",
++        coordinatorThreadId: pm,
++      },
++    });
++    const failing = {
++      ...settings,
++      updateSettings: () =>
++        Effect.fail(
++          new ServerSettingsError({
++            settingsPath: "/isolated/settings.json",
++            operation: "write-file",
++            cause: "unavailable",
++          }),
++        ),
++    };
++    const result = yield* inheritInitiative(failing, pm, ThreadId.make("accepted"));
++    assert.isTrue("initiativeWarning" in result);
++    assert.deepEqual((yield* settings.getSettings).initiatives.routing?.memberThreadIds, [pm]);
++  }).pipe(Effect.provide(ServerSettingsService.layerTest())),
++);
+diff --git a/apps/server/src/initiatives.ts b/apps/server/src/initiatives.ts
+new file mode 100644
+index 00000000..fbb41f4a
+--- /dev/null
++++ b/apps/server/src/initiatives.ts
+@@ -0,0 +1,39 @@
++import { OrchestratorMcpFailure, type ThreadId } from "@t3tools/contracts";
++import { initiativeForThread } from "@t3tools/shared/initiatives";
++import * as Effect from "effect/Effect";
++import { ServerSettingsService } from "./serverSettings.ts";
++
++/** Grouping is independently repairable after an accepted launch; never turn it into a false launch failure. */
++export const inheritInitiative = Effect.fn("initiatives.inherit")(function* (
++  settings: ServerSettingsService["Service"],
++  callerId: ThreadId,
++  threadId: ThreadId,
++  options: { readonly isReplay?: boolean } = {},
++) {
++  return yield* Effect.gen(function* () {
++    const current = yield* settings.getSettings;
++    const existingId = initiativeForThread(current.initiatives, threadId);
++    if (existingId !== undefined) return { initiativeId: existingId };
++    if (options.isReplay === true) return {};
++    const initiativeId = initiativeForThread(current.initiatives, callerId);
++    if (initiativeId === undefined) return {};
++    const assigned = yield* settings.updateSettings({
++      initiativeChange: { action: "assign", id: initiativeId, threadId, onlyIfUngrouped: true },
++    });
++    const assignedId = initiativeForThread(assigned.initiatives, threadId);
++    if (assignedId === undefined)
++      return yield* new OrchestratorMcpFailure({
++        code: "orchestration_error",
++        message: "Initiative changed during assignment",
++      });
++    return { initiativeId: assignedId };
++  }).pipe(
++    Effect.match({
++      onSuccess: (result) => result,
++      onFailure: () => ({
++        initiativeWarning:
++          "Thread launched; initiative display assignment failed. Repair that assignment without launching another thread.",
++      }),
++    }),
++  );
++});
+diff --git a/apps/server/src/mcp/OrchestratorMcpService.test.ts b/apps/server/src/mcp/OrchestratorMcpService.test.ts
+index 4df2cfa6..5902c3a9 100644
+--- a/apps/server/src/mcp/OrchestratorMcpService.test.ts
++++ b/apps/server/src/mcp/OrchestratorMcpService.test.ts
+@@ -2098,6 +2098,13 @@ describe("OrchestratorMcpService provider resolution", () => {
+             { databaseLayer: layerDatabase, runEffectWorker: false },
+           );
+           const layerSettings = ServerSettings.layerTest({
++            initiatives: {
++              original: {
++                name: "Original",
++                coordinatorThreadId: parentThreadId,
++                memberThreadIds: [parentThreadId],
++              },
++            },
+             providerInstances: {
+               [codexInstanceId]: { driver: "codex", enabled: true },
+               [altInstanceId]: { driver: "codex", enabled: true },
+@@ -2178,6 +2185,39 @@ describe("OrchestratorMcpService provider resolution", () => {
+             assert.equal(child.providerInstanceId, selection.instanceId);
+             assert.equal(child.model, selection.model);
+             assert.deepEqual(yield* service.createThreads(scope, request), first);
++            assert.include(
++              (yield* settings.getSettings).initiatives.original!.memberThreadIds,
++              child.threadId,
++            );
++            yield* settings.updateSettings({
++              initiativeChange: {
++                action: "create",
++                id: "explicit",
++                name: "Explicit",
++                coordinatorThreadId: child.threadId,
++              },
++            });
++            yield* settings.updateSettings({
++              initiativeChange: {
++                action: "create",
++                id: "parent-next",
++                name: "Parent next",
++                coordinatorThreadId: parentThreadId,
++              },
++            });
++            const moved = (yield* settings.getSettings).initiatives;
++            yield* service.createThreads(scope, request);
++            assert.deepEqual((yield* settings.getSettings).initiatives, moved);
++            yield* settings.updateSettings({
++              initiativeChange: {
++                action: "remove",
++                id: "explicit",
++                threadId: child.threadId,
++              },
++            });
++            const removed = (yield* settings.getSettings).initiatives;
++            yield* service.createThreads(scope, request);
++            assert.deepEqual((yield* settings.getSettings).initiatives, removed);
+ 
+             // The creation receipt exists, but this prompt has not been accepted yet.
+             const withPrompt = {
+diff --git a/apps/server/src/mcp/OrchestratorMcpService.ts b/apps/server/src/mcp/OrchestratorMcpService.ts
+index 5211a9f7..26e187d3 100644
+--- a/apps/server/src/mcp/OrchestratorMcpService.ts
++++ b/apps/server/src/mcp/OrchestratorMcpService.ts
+@@ -1,3 +1,4 @@
++import { inheritInitiative } from "../initiatives.ts";
+ import {
+   CommandId,
+   type RunId,
+@@ -2934,8 +2935,15 @@ const make = Effect.gen(function* () {
+                     ),
+                   ),
+                 );
++              const initiative = yield* inheritInitiative(
++                serverSettings,
++                scope.thread.threadId,
++                threadId,
++                { isReplay: isRetryOfAcceptedCreation },
++              );
+               return {
+                 threadId,
++                ...initiative,
+                 link: formatThreadLink(
+                   { environmentId: scope.environmentId, threadId },
+                   projection.thread.title,
+diff --git a/apps/server/src/mcp/toolkits/core.test.ts b/apps/server/src/mcp/toolkits/core.test.ts
+index 71116053..dbb6be84 100644
+--- a/apps/server/src/mcp/toolkits/core.test.ts
++++ b/apps/server/src/mcp/toolkits/core.test.ts
+@@ -78,6 +78,7 @@ const decodeMcpAttachmentInput = Schema.decodeUnknownEffect(McpAttachmentInput);
+ const decodeThreadReadResult = Schema.decodeUnknownEffect(OrchestratorMcpThreadReadResult);
+ 
+ const layerThreadToolkit = McpHttpServer.layerThreadToolkit.pipe(
++  Layer.provide(ServerSettings.layerTest()),
+   Layer.provide(Layer.mock(ThreadSearch.ThreadSearch)({})),
+   Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
+   Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
+@@ -794,6 +795,7 @@ it.effect.each([
+   }).pipe(
+     Effect.provide(
+       McpHttpServer.layerThreadToolkit.pipe(
++        Layer.provide(ServerSettings.layerTest()),
+         Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
+         Layer.provide(NodeCrypto.layer),
+         Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
+diff --git a/apps/server/src/mcp/toolkits/initiatives.test.ts b/apps/server/src/mcp/toolkits/initiatives.test.ts
+new file mode 100644
+index 00000000..2c3b8fa6
+--- /dev/null
++++ b/apps/server/src/mcp/toolkits/initiatives.test.ts
+@@ -0,0 +1,200 @@
++import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
++import { expect, it } from "@effect/vitest";
++import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
++import * as Effect from "effect/Effect";
++import * as Layer from "effect/Layer";
++import { McpSchema, McpServer } from "effect/ai";
++import { vi } from "vite-plus/test";
++
++import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
++import * as ThreadSearch from "../../orchestration-v2/ThreadSearch.ts";
++import * as PeerForwarding from "../../peer/PeerForwarding.ts";
++import * as PeerLinkRequests from "../../peer/PeerLinkRequests.ts";
++import * as PeerLinks from "../../peer/PeerLinks.ts";
++import * as ScheduledTaskService from "../../scheduledTasks/ScheduledTaskService.ts";
++import * as ServerSettings from "../../serverSettings.ts";
++import * as McpHttpServer from "../McpHttpServer.ts";
++import * as McpInvocationContext from "../McpInvocationContext.ts";
++import * as McpToolAccessTestkit from "../McpToolAccess.testkit.ts";
++
++const coordinatorId = ThreadId.make("initiative-coordinator");
++const memberId = ThreadId.make("initiative-member");
++const coordinator = McpToolAccessTestkit.liveThreadShell(coordinatorId);
++const member = {
++  ...McpToolAccessTestkit.liveThreadShell(memberId),
++  projectId: ProjectId.make("another-repository"),
++};
++
++const scope = (
++  access: McpInvocationContext.McpClientCaller["access"] = "full-access",
++): McpInvocationContext.McpInvocationScope => ({
++  environmentId: EnvironmentId.make("initiative-environment"),
++  requestNamespace: "client:initiative-test",
++  thread: undefined,
++  client: { sessionId: "initiative-test", label: "Initiative test", access },
++  issuedAt: 0,
++  capabilities: new Set(["orchestration"]),
++});
++
++const client = McpSchema.McpServerClient.of({
++  clientId: 1,
++  protocolVersion: "2025-06-18",
++  clientCapabilities: {},
++  clientInfo: { name: "initiative-test", version: "1" },
++  initializePayload: {
++    protocolVersion: "2025-06-18",
++    capabilities: {},
++    clientInfo: { name: "initiative-test", version: "1" },
++  },
++  getClient: Effect.die("unused"),
++});
++
++const call = (
++  name: "t3_initiative_list" | "t3_initiative_update",
++  args: Record<string, unknown> = {},
++  caller = scope(),
++) =>
++  Effect.gen(function* () {
++    const server = yield* McpServer.McpServer;
++    return yield* server
++      .callTool({ name, arguments: args })
++      .pipe(
++        Effect.provideService(McpInvocationContext.McpInvocationContext, caller),
++        Effect.provideService(McpSchema.McpServerClient, client),
++      );
++  });
++
++const declaredFailure = (result: McpSchema.CallToolResult) => {
++  const text = result.content[0];
++  return result.isError === true && text?.type === "text" ? JSON.parse(text.text) : undefined;
++};
++
++const create = () =>
++  call("t3_initiative_update", {
++    change: {
++      action: "create",
++      id: "routing",
++      name: "Routing",
++      coordinatorThreadId: coordinatorId,
++    },
++  });
++
++const makeHarness = () => {
++  const threads = new Map([
++    [coordinatorId, coordinator],
++    [memberId, member],
++  ]);
++  const dispatch = vi.fn(() => Effect.succeed({ sequence: 1, storedEvents: [] }));
++  const layer = McpHttpServer.layerThreadToolkit.pipe(
++    Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
++    Layer.provide(ServerSettings.layerTest()),
++    Layer.provide(NodeCrypto.layer),
++    Layer.provide(Layer.mock(ThreadSearch.ThreadSearch)({})),
++    Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
++    Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
++    Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
++    Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
++    Layer.provide(
++      Layer.mock(ThreadManagement.ThreadManagementService)({
++        getThreadShell: (id) => Effect.succeed(threads.get(id) ?? null),
++        getProjectThreadRecords: ({ threadId }) => {
++          const shell = threads.get(threadId);
++          return shell === undefined
++            ? Effect.die("Unexpected projection lookup for an unknown test thread")
++            : Effect.succeed(McpToolAccessTestkit.idleThreadProjection(shell));
++        },
++        dispatch,
++      }),
++    ),
++  );
++  return { layer, threads, dispatch };
++};
++
++it.effect("creates, lists, and assigns initiative members across projects through MCP", () => {
++  const { layer } = makeHarness();
++  return Effect.gen(function* () {
++    expect((yield* call("t3_initiative_list")).structuredContent).toEqual({});
++    const created = yield* create();
++    expect(created.isError).toBe(false);
++    expect(created.structuredContent).toEqual({
++      routing: {
++        name: "Routing",
++        coordinatorThreadId: coordinatorId,
++        memberThreadIds: [coordinatorId],
++      },
++    });
++    const assigned = yield* call("t3_initiative_update", {
++      change: { action: "assign", id: "routing", threadId: memberId },
++    });
++    expect(assigned.isError).toBe(false);
++    expect(assigned.structuredContent).toEqual({
++      routing: {
++        name: "Routing",
++        coordinatorThreadId: coordinatorId,
++        memberThreadIds: [coordinatorId, memberId],
++      },
++    });
++    expect((yield* call("t3_initiative_list")).structuredContent).toEqual(
++      assigned.structuredContent,
++    );
++  }).pipe(Effect.provide(layer));
++});
++
++it.effect(
++  "allows read-only initiative listing and refuses mutations without changing membership",
++  () => {
++    const { layer } = makeHarness();
++    return Effect.gen(function* () {
++      const created = yield* create();
++      const readOnly = scope("read-only");
++      expect((yield* call("t3_initiative_list", {}, readOnly)).structuredContent).toEqual(
++        created.structuredContent,
++      );
++      const denied = yield* call(
++        "t3_initiative_update",
++        {
++          change: { action: "assign", id: "routing", threadId: memberId },
++        },
++        readOnly,
++      );
++      expect(declaredFailure(denied)).toMatchObject({ code: "capability_denied" });
++      expect((yield* call("t3_initiative_list")).structuredContent).toEqual(
++        created.structuredContent,
++      );
++    }).pipe(Effect.provide(layer));
++  },
++);
++
++it.effect("refuses an unknown member without persisting its ID", () => {
++  const { layer } = makeHarness();
++  return Effect.gen(function* () {
++    const created = yield* create();
++    const refused = yield* call("t3_initiative_update", {
++      change: { action: "assign", id: "routing", threadId: "missing-thread" },
++    });
++    expect(declaredFailure(refused)).toMatchObject({ code: "thread_not_found" });
++    expect((yield* call("t3_initiative_list")).structuredContent).toEqual(
++      created.structuredContent,
++    );
++  }).pipe(Effect.provide(layer));
++});
++
++it.effect("deletes only the initiative and preserves its sessions and lifecycle", () => {
++  const { layer, threads, dispatch } = makeHarness();
++  const before = [...threads.values()].map((thread) => ({ ...thread }));
++  return Effect.gen(function* () {
++    yield* create();
++    const assigned = yield* call("t3_initiative_update", {
++      change: { action: "assign", id: "routing", threadId: memberId },
++    });
++    expect(assigned.isError).toBe(false);
++    const deleted = yield* call("t3_initiative_update", {
++      change: { action: "delete", id: "routing" },
++    });
++    expect(deleted.isError).toBe(false);
++    expect(deleted.structuredContent).toEqual({});
++    expect((yield* call("t3_initiative_list")).structuredContent).toEqual({});
++    expect([...threads.values()]).toEqual(before);
++    expect(dispatch).not.toHaveBeenCalled();
++  }).pipe(Effect.provide(layer));
++});
+diff --git a/apps/server/src/mcp/toolkits/project/handlers.test.ts b/apps/server/src/mcp/toolkits/project/handlers.test.ts
+index b77df3ac..1574e4b0 100644
+--- a/apps/server/src/mcp/toolkits/project/handlers.test.ts
++++ b/apps/server/src/mcp/toolkits/project/handlers.test.ts
+@@ -37,6 +37,7 @@ import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
+ import * as VcsProcess from "../../../vcs/VcsProcess.ts";
+ import * as McpInvocationContext from "../../McpInvocationContext.ts";
+ import * as McpToolAccess from "../../McpToolAccess.ts";
++import { liveThreadShell } from "../../McpToolAccess.testkit.ts";
+ import * as ProjectHandlers from "./handlers.ts";
+ import { ProjectToolkit } from "./tools.ts";
+ 
+@@ -53,6 +54,7 @@ const clientLaunchHarness = (input: {
+   readonly hostedAppUrl?: string;
+   /** The orchestrator refuses the new thread's mode, as under a managed ceiling. */
+   readonly refusedByCeiling?: true;
++  readonly parentThread?: OrchestrationV2ThreadShell;
+ }) => {
+   const projectId = ProjectId.make("project:client-target");
+   const modelSelection = {
+@@ -84,19 +86,30 @@ const clientLaunchHarness = (input: {
+     Layer.succeed(McpInvocationContext.McpInvocationContext, {
+       environmentId: EnvironmentId.make("environment"),
+       requestNamespace: "client:session-1",
+-      thread: undefined,
+-      client: {
+-        sessionId: "session-1",
+-        label: "Claude Code",
+-        access: input.runtimeModeCeiling,
+-        hostedAppUrl: input.hostedAppUrl,
+-      },
++      thread:
++        input.parentThread === undefined
++          ? undefined
++          : {
++              threadId: input.parentThread.id,
++              providerSessionId: "parent-session",
++              providerInstanceId: input.parentThread.providerInstanceId!,
++            },
++      client:
++        input.parentThread === undefined
++          ? {
++              sessionId: "session-1",
++              label: "Claude Code",
++              access: input.runtimeModeCeiling,
++              hostedAppUrl: input.hostedAppUrl,
++            }
++          : undefined,
+       issuedAt: 0,
+       capabilities: new Set(["orchestration" as const]),
+     }),
+     Layer.mock(ThreadManagement.ThreadManagementService)({
+       // A thread exists once a launch started it.
+       getThreadShell: (threadId) => {
++        if (threadId === input.parentThread?.id) return Effect.succeed(input.parentThread);
+         const launch = input.launched.find((candidate) => candidate.threadId === threadId);
+         return Effect.succeed(
+           launch === undefined
+@@ -335,38 +348,83 @@ it.effect("a launch steps an inherited mode down to the provider's, and refuses
+ it.effect("a launch retried with the same clientRequestId replays the first one", () =>
+   Effect.gen(function* () {
+     const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
++    const parent = liveThreadShell(ThreadId.make("initiative-launch-parent"));
+     const { projectId, dependencies } = clientLaunchHarness({
+-      runtimeModeCeiling: "auto",
++      runtimeModeCeiling: "full-access",
+       launched,
++      parentThread: parent,
+     });
+-    const toolkit = yield* ProjectToolkit.pipe(
+-      Effect.provide(
+-        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+-      ),
+-    );
+-    const launch = (clientRequestId: string | undefined) =>
+-      toolkit
+-        .handle("t3_thread_launch", {
+-          title: "Fix",
+-          projectId,
+-          message: "Fix the bug",
+-          ...(clientRequestId === undefined ? {} : { clientRequestId }),
+-        })
+-        .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+-
+-    yield* launch("fix-1");
+-    yield* launch("fix-1");
+-    yield* launch("fix-2");
+-    yield* launch(undefined);
+-    yield* launch(undefined);
+-    const ids = launched.map((input) => [input.commandId, input.threadId]);
+-    // The same key sends the same command and thread ids, which the launch
+-    // service replays instead of starting a second thread.
+-    expect(ids[0]).toEqual(ids[1]);
+-    expect(ids[0]?.[0]).toMatch(/^mcp:launch:[0-9a-f]{64}$/);
+-    expect(ids[2]).not.toEqual(ids[0]);
+-    // Without a key every launch is new.
+-    expect(ids[3]).not.toEqual(ids[4]);
++    yield* Effect.gen(function* () {
++      const settings = yield* ServerSettings.ServerSettingsService;
++      yield* settings.updateSettings({
++        initiativeChange: {
++          action: "create",
++          id: "original",
++          name: "Original",
++          coordinatorThreadId: parent.id,
++        },
++      });
++      const toolkit = yield* ProjectToolkit.pipe(
++        Effect.provide(McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer)),
++      );
++      const launch = (clientRequestId: string | undefined) =>
++        toolkit
++          .handle("t3_thread_launch", {
++            title: "Fix",
++            projectId,
++            message: "Fix the bug",
++            ...(clientRequestId === undefined ? {} : { clientRequestId }),
++          })
++          .pipe(Stream.unwrap, Stream.runCollect);
++
++      yield* launch("fix-1");
++      const childId = launched[0]!.threadId;
++      if (childId === undefined) throw new Error("The first launch did not create a thread");
++      expect((yield* settings.getSettings).initiatives.original?.memberThreadIds).toContain(
++        childId,
++      );
++      yield* settings.updateSettings({
++        initiativeChange: {
++          action: "create",
++          id: "explicit",
++          name: "Explicit",
++          coordinatorThreadId: childId,
++        },
++      });
++      yield* settings.updateSettings({
++        initiativeChange: {
++          action: "create",
++          id: "parent-next",
++          name: "Parent next",
++          coordinatorThreadId: parent.id,
++        },
++      });
++      const moved = (yield* settings.getSettings).initiatives;
++      yield* launch("fix-1");
++      expect((yield* settings.getSettings).initiatives).toEqual(moved);
++      yield* settings.updateSettings({
++        initiativeChange: {
++          action: "remove",
++          id: "explicit",
++          threadId: childId,
++        },
++      });
++      const removed = (yield* settings.getSettings).initiatives;
++      yield* launch("fix-1");
++      expect((yield* settings.getSettings).initiatives).toEqual(removed);
++      yield* launch("fix-2");
++      yield* launch(undefined);
++      yield* launch(undefined);
++      const ids = launched.map((input) => [input.commandId, input.threadId]);
++      // The same key sends the same command and thread ids, which the launch
++      // service replays instead of starting a second thread.
++      expect(ids[0]).toEqual(ids[1]);
++      expect(ids[0]).toEqual(ids[2]);
++      expect(ids[0]?.[0]).toMatch(/^mcp:launch:[0-9a-f]{64}$/);
++      expect(ids[3]).not.toEqual(ids[0]);
++      // Without a key every launch is new.
++      expect(ids[4]).not.toEqual(ids[5]);
++    }).pipe(Effect.provide(dependencies));
+   }),
+ );
+ 
+diff --git a/apps/server/src/mcp/toolkits/project/handlers.ts b/apps/server/src/mcp/toolkits/project/handlers.ts
+index ab27b6b5..06e16f47 100644
+--- a/apps/server/src/mcp/toolkits/project/handlers.ts
++++ b/apps/server/src/mcp/toolkits/project/handlers.ts
+@@ -1,3 +1,4 @@
++import { inheritInitiative } from "../../../initiatives.ts";
+ import {
+   CommandId,
+   MessageId,
+@@ -274,9 +275,19 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
+           }),
+         );
+         const thread = result.projection.thread;
++        const initiative =
++          caller === undefined
++            ? {}
++            : yield* inheritInitiative(
++                yield* ServerSettings.ServerSettingsService,
++                caller.id,
++                thread.id,
++                { isReplay: replaying },
++              );
+         const run = result.projection.runs.find((run) => run.userMessageId === messageId);
+         return {
+           threadId: thread.id,
++          ...initiative,
+           link: McpInvocationContext.threadLinkFor(scope, thread.id, thread.title),
+           projectId: thread.projectId,
+           modelSelection: thread.modelSelection,
+diff --git a/apps/server/src/mcp/toolkits/project/tools.ts b/apps/server/src/mcp/toolkits/project/tools.ts
+index 56799959..6c872235 100644
+--- a/apps/server/src/mcp/toolkits/project/tools.ts
++++ b/apps/server/src/mcp/toolkits/project/tools.ts
+@@ -156,6 +156,8 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
+   }),
+   success: Schema.Struct({
+     threadId: ThreadId,
++    initiativeId: Schema.optional(Schema.String),
++    initiativeWarning: Schema.optional(Schema.String),
+     link: Schema.optional(Schema.String),
+     projectId: ProjectId,
+     modelSelection: ModelSelection,
+diff --git a/apps/server/src/mcp/toolkits/thread/handlers.ts b/apps/server/src/mcp/toolkits/thread/handlers.ts
+index 32e45b5d..ca4e6c06 100644
+--- a/apps/server/src/mcp/toolkits/thread/handlers.ts
++++ b/apps/server/src/mcp/toolkits/thread/handlers.ts
+@@ -1,3 +1,4 @@
++import { ServerSettingsService } from "../../../serverSettings.ts";
+ import {
+   type CommandId,
+   type RuntimeRequestId,
+@@ -91,6 +92,46 @@ const writesThread = <P extends { readonly threadId?: ThreadId | undefined }, A,
+ ) => McpToolAccess.writesThreads((params: P) => [params.threadId], handle);
+ 
+ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
++  t3_initiative_list: McpToolAccess.reads(() =>
++    Effect.gen(function* () {
++      const settings = yield* ServerSettingsService;
++      return (yield* settings.getSettings.pipe(Effect.mapError(unavailable))).initiatives;
++    }),
++  ),
++  t3_initiative_update: McpToolAccess.writesEnvironment((input) =>
++    Effect.gen(function* () {
++      const service = yield* ServerSettingsService;
++      const { change } = input;
++      const before = (yield* service.getSettings.pipe(Effect.mapError(unavailable))).initiatives;
++      const existing = Object.hasOwn(before, change.id) ? before[change.id] : undefined;
++      if (change.action !== "create" && existing === undefined)
++        return yield* new OrchestratorMcpFailure({
++          code: "invalid_request",
++          message: "The initiative was not found.",
++        });
++      if (
++        change.action === "create" &&
++        existing !== undefined &&
++        (existing.name !== change.name ||
++          existing.coordinatorThreadId !== change.coordinatorThreadId)
++      )
++        return yield* new OrchestratorMcpFailure({
++          code: "invalid_request",
++          message: "That initiative ID already names a different group.",
++        });
++      const threadId =
++        change.action === "create"
++          ? change.coordinatorThreadId
++          : "threadId" in change
++            ? change.threadId
++            : null;
++      if (threadId !== null) yield* readThread(threadId, []);
++      return (yield* service
++        .updateSettings({ initiativeChange: change })
++        .pipe(Effect.mapError(unavailable))).initiatives;
++    }),
++  ),
++
+   run_scheduled_task_now: McpToolAccess.writesEnvironment((input) =>
+     Effect.gen(function* () {
+       const scheduler = yield* ScheduledTasks.ScheduledTaskService;
+diff --git a/apps/server/src/mcp/toolkits/thread/tools.ts b/apps/server/src/mcp/toolkits/thread/tools.ts
+index c6670c4e..402250f0 100644
+--- a/apps/server/src/mcp/toolkits/thread/tools.ts
++++ b/apps/server/src/mcp/toolkits/thread/tools.ts
+@@ -1,3 +1,5 @@
++import { InitiativeChange, Initiatives } from "@t3tools/contracts";
++import { ServerSettingsService } from "../../../serverSettings.ts";
+ import {
+   OrchestratorMcpEnvironmentTarget,
+   ScheduledTaskId,
+@@ -237,7 +239,33 @@ const ScheduledTaskRunTool = Tool.make("run_scheduled_task_now", {
+   .annotate(Tool.Destructive, true)
+   .annotate(Tool.OpenWorld, true);
+ 
++const InitiativeListTool = Tool.make("t3_initiative_list", {
++  description:
++    "List explicit initiative display groups, coordinators and member thread IDs. Display membership does not grant session management authority.",
++  parameters: Tool.EmptyParams,
++  success: Initiatives,
++  failure: OrchestratorMcpFailure,
++  failureMode: "return" as const,
++  dependencies: [McpInvocationContext.McpInvocationContext, ServerSettingsService],
++}).annotate(Tool.Readonly, true);
++
++const InitiativeUpdateTool = Tool.make("t3_initiative_update", {
++  description:
++    "Create, rename or delete an initiative display group, assign/remove a thread, or select its coordinator. Explicit assignment moves display membership across repository projects. Removing a group preserves every thread and its lifecycle. Builder and dispatcher own management authority independently.",
++  parameters: Schema.Struct({ change: InitiativeChange }),
++  success: Initiatives,
++  failure: OrchestratorMcpFailure,
++  failureMode: "return" as const,
++  dependencies: [
++    McpInvocationContext.McpInvocationContext,
++    ServerSettingsService,
++    ThreadManagementService.ThreadManagementService,
++  ],
++}).annotate(Tool.Destructive, false);
++
+ export const ThreadToolkit = Toolkit.make(
++  InitiativeListTool,
++  InitiativeUpdateTool,
+   ScheduledTaskRunTool,
+   ThreadSearchTool,
+   ThreadConfigureTool,
+diff --git a/apps/server/src/provider/agentContextBudget.json b/apps/server/src/provider/agentContextBudget.json
+index 4439c509..ae2bca71 100644
+--- a/apps/server/src/provider/agentContextBudget.json
++++ b/apps/server/src/provider/agentContextBudget.json
+@@ -1,5 +1,5 @@
+ {
+   "claudeSystemAppendBytes": 5597,
+   "codexAdditionalContextBytes": 7327,
+-  "mcpToolListJsonBytes": 48217
++  "mcpToolListJsonBytes": 49286
+ }
+diff --git a/apps/server/src/ws.ts b/apps/server/src/ws.ts
+index 5564b801..69c5d432 100644
+--- a/apps/server/src/ws.ts
++++ b/apps/server/src/ws.ts
+@@ -1975,6 +1975,7 @@ export const layerWsRpc = (
+             : { managedPolicy: serverSettings.managedPolicy }),
+           shellResumeCompletionMarker: true,
+           shellThreadFamilies: true,
++          initiativeGroups: true,
+           threadLinkMetadata: true,
+           shellOlderSettled: true,
+           threadResumeCompletionMarker: true,
+diff --git a/apps/web/src/components/InitiativeSidebar.browser.test.tsx b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
+new file mode 100644
+index 00000000..916595c5
+--- /dev/null
++++ b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
+@@ -0,0 +1,131 @@
++import {
++  EnvironmentId,
++  ThreadId,
++  type Initiatives,
++  type InitiativeChange,
++} from "@t3tools/contracts";
++import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
++import { applyInitiativeChange } from "@t3tools/shared/initiatives";
++import "~/index.css";
++import { expect, it, vi } from "vite-plus/test";
++import { page } from "vite-plus/test/browser";
++import { render } from "../../test/render";
++
++const state = vi.hoisted(() => ({
++  initiatives: {} as Initiatives,
++  changes: [] as InitiativeChange[],
++  supported: true,
++  mount: vi.fn(
++    (_registry: unknown, _environmentId: unknown, _threadId: unknown) => () => undefined,
++  ),
++}));
++vi.mock(import("../state/environments"), () => ({
++  useEnvironments: (() => ({
++    environments: [
++      {
++        environmentId: "local",
++        label: "Local",
++        serverConfig: {
++          initiativeGroups: state.supported,
++          settings: { initiatives: state.initiatives },
++        },
++      },
++    ],
++  })) as never,
++}));
++vi.mock(import("../state/threads"), () => ({ threadFamilies: { mount: state.mount } }) as never);
++vi.mock(import("../rpc/atomRegistry"), () => ({ appAtomRegistry: {} }) as never);
++vi.mock(import("../hooks/useSettings"), () => ({
++  useUpdateEnvironmentSettings: (() =>
++    (patch: { initiativeChange: InitiativeChange }, callbacks?: { onSaved?: () => void }) => {
++      state.changes.push(patch.initiativeChange);
++      state.initiatives = applyInitiativeChange(state.initiatives, patch.initiativeChange);
++      callbacks?.onSaved?.();
++    }) as never,
++}));
++import { initiativeLayout } from "./InitiativeSidebar.logic";
++import { InitiativeSidebar } from "./InitiativeSidebar";
++const environmentId = EnvironmentId.make("local");
++const pm = ThreadId.make("pm");
++const api = ThreadId.make("api");
++const threads = [
++  { id: pm, title: "Routing PM", runtime: null, settledOverride: null },
++  { id: api, title: "Routing API", runtime: null, settledOverride: "settled" },
++].map((thread) => ({ ...thread, environmentId, archivedAt: null })) as EnvironmentThreadShell[];
++const view = () => (
++  <ul>
++    <InitiativeSidebar
++      threads={threads}
++      groups={
++        initiativeLayout(
++          threads,
++          new Map([
++            [
++              environmentId,
++              { initiativeGroups: state.supported, settings: { initiatives: state.initiatives } },
++            ],
++          ]),
++          null,
++          [],
++        ).groups
++      }
++      renderThread={(thread) => <li>{thread.title}</li>}
++      onOpen={() => undefined}
++    />
++  </ul>
++);
++function setup() {
++  state.supported = true;
++  state.changes = [];
++  state.mount.mockClear();
++  state.initiatives = {
++    routing: { name: "Routing", coordinatorThreadId: pm, memberThreadIds: [pm, api] },
++  };
++  localStorage.clear();
++}
++it("keeps settled members with the PM, mounts saved rows, and persists collapse", async () => {
++  setup();
++  await using screen = await render(view());
++  await expect.element(screen.getByText("Routing PM")).toBeInTheDocument();
++  await expect.element(screen.getByText("Routing API")).toBeInTheDocument();
++  expect(state.mount.mock.calls.map((call) => call[2])).toEqual([pm, api]);
++  await screen.getByRole("button", { name: /^Routing/ }).click();
++  await expect.element(screen.getByText("Routing PM")).not.toBeInTheDocument();
++  expect(JSON.parse(localStorage.getItem("t3code:initiatives:collapsed")!)).toEqual([
++    "initiative:local:routing",
++  ]);
++  expect(state.changes).toEqual([]);
++});
++it("creates a named group with an explicit PM and settled worker without lifecycle commands", async () => {
++  setup();
++  state.initiatives = {};
++  await using screen = await render(view());
++  await screen.getByRole("button", { name: "New initiative" }).click();
++  await page.getByRole("textbox", { name: "Name" }).fill("Routing");
++  await page.getByRole("combobox", { name: "Project manager" }).selectOptions(pm);
++  await page.getByRole("checkbox", { name: "Routing API" }).click();
++  await page.getByRole("button", { name: "Save", exact: true }).click();
++  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
++  await screen.rerender(view());
++  const group = Object.values(state.initiatives)[0]!;
++  expect(group.name).toBe("Routing");
++  expect(group.coordinatorThreadId).toBe(pm);
++  expect(new Set(group.memberThreadIds)).toEqual(new Set([pm, api]));
++  await expect.element(screen.getByText("Routing API")).toBeInTheDocument();
++  expect(threads[1]?.settledOverride).toBe("settled");
++  expect(state.changes.map((change) => change.action)).toEqual([
++    "create",
++    "assign",
++    "assign",
++    "coordinator",
++  ]);
++});
++it("does not expose grouping controls for an unpatched environment", async () => {
++  setup();
++  state.supported = false;
++  await using screen = await render(view());
++  await expect
++    .element(screen.getByRole("button", { name: "New initiative" }))
++    .not.toBeInTheDocument();
++  expect(state.mount).not.toHaveBeenCalled();
++});
+diff --git a/apps/web/src/components/InitiativeSidebar.logic.test.ts b/apps/web/src/components/InitiativeSidebar.logic.test.ts
+new file mode 100644
+index 00000000..ae2eab76
+--- /dev/null
++++ b/apps/web/src/components/InitiativeSidebar.logic.test.ts
+@@ -0,0 +1,61 @@
++import { expect, it } from "vite-plus/test";
++import { EnvironmentId, ProjectId, ThreadId, type Initiative } from "@t3tools/contracts";
++import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
++import { initiativeMembers, initiativeSummary, initiativeLayout } from "./InitiativeSidebar.logic";
++it("keeps the coordinator first and accounts for every member including unloaded sessions", () => {
++  const id = (value: string) => ThreadId.make(value);
++  const group: Initiative = {
++    name: "Routing",
++    coordinatorThreadId: id("pm"),
++    memberThreadIds: [id("api"), id("pm"), id("ui"), id("old")],
++  };
++  expect(initiativeMembers(group)).toEqual(["pm", "api", "ui", "old"]);
++  const shell = (fields: object) => ({ runtime: null, ...fields }) as EnvironmentThreadShell;
++  const threads = new Map([
++    ["pm", shell({ hasPendingUserInput: true })],
++    ["api", shell({ runtime: { status: "running" } })],
++    ["ui", shell({ settledOverride: "settled" })],
++  ]);
++  expect(initiativeSummary(group, threads)).toBe(
++    "1 needs you · 1 working · 1 idle or done · 1 not loaded",
++  );
++});
++
++it("uses grouped order and scope for ranges while excluding collapsed and unrelated members", () => {
++  const environmentId = EnvironmentId.make("local");
++  const id = (value: string) => ThreadId.make(value);
++  const shell = (name: string, projectId: string) =>
++    ({
++      environmentId,
++      id: id(name),
++      projectId: ProjectId.make(projectId),
++    }) as EnvironmentThreadShell;
++  const a = shell("a", "api");
++  const unrelated = shell("unrelated", "api");
++  const b = shell("b", "ui");
++  const hidden = shell("hidden", "api");
++  const configs = new Map([
++    [
++      environmentId,
++      {
++        initiativeGroups: true,
++        settings: {
++          initiatives: {
++            routing: { name: "Routing", coordinatorThreadId: a.id, memberThreadIds: [a.id, b.id] },
++            other: { name: "Other", coordinatorThreadId: null, memberThreadIds: [hidden.id] },
++          },
++        },
++      },
++    ],
++  ]);
++  const layout = initiativeLayout([a, unrelated, b, hidden], configs, null, [
++    "initiative:local:other",
++  ]);
++  expect(layout.visibleThreads.map((thread) => thread.id)).toEqual([a.id, b.id]);
++  expect(layout.keys.has("local:unrelated")).toBe(false);
++  expect(layout.keys.has("local:hidden")).toBe(true);
++  const scoped = initiativeLayout([a, unrelated, b, hidden], configs, new Set(["local:ui"]), []);
++  expect(scoped.visibleThreads.map((thread) => thread.id)).toEqual([b.id]);
++  expect(scoped.groups[0]?.displayed.coordinatorThreadId).toBeNull();
++  expect(scoped.groups[1]?.hidden).toBe(true);
++});
+diff --git a/apps/web/src/components/InitiativeSidebar.logic.ts b/apps/web/src/components/InitiativeSidebar.logic.ts
+new file mode 100644
+index 00000000..2f725aad
+--- /dev/null
++++ b/apps/web/src/components/InitiativeSidebar.logic.ts
+@@ -0,0 +1,102 @@
++import type { Initiative, Initiatives, EnvironmentId, ThreadId } from "@t3tools/contracts";
++import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
++import { resolveSidebarThreadStatus } from "./Sidebar.logic";
++
++export function initiativeMembers(group: Initiative): readonly ThreadId[] {
++  return [
++    ...new Set([
++      ...(group.coordinatorThreadId === null ? [] : [group.coordinatorThreadId]),
++      ...group.memberThreadIds,
++    ]),
++  ];
++}
++
++export function initiativeSummary(
++  group: Initiative,
++  threads: ReadonlyMap<string, EnvironmentThreadShell>,
++): string {
++  const counts = { working: 0, attention: 0, failed: 0, waiting: 0, ready: 0, unloaded: 0 };
++  for (const id of initiativeMembers(group)) {
++    const thread = threads.get(id);
++    if (!thread) {
++      counts.unloaded++;
++      continue;
++    }
++    const status = resolveSidebarThreadStatus(thread);
++    if (status === "approval" || status === "input" || status === "request") counts.attention++;
++    else if (status === "working" || status === "preparing") counts.working++;
++    else if (status === "failed" || status === "limited") counts.failed++;
++    else if (status === "waiting") counts.waiting++;
++    else counts.ready++;
++  }
++  return (
++    [
++      [counts.attention, "needs you"],
++      [counts.failed, "failed"],
++      [counts.working, "working"],
++      [counts.waiting, "waiting"],
++      [counts.ready, "idle or done"],
++      [counts.unloaded, "not loaded"],
++    ]
++      .filter(([count]) => count !== 0)
++      .map(([count, label]) => `${count} ${label}`)
++      .join(" · ") || "No sessions"
++  );
++}
++
++export interface InitiativeSidebarGroup {
++  environmentId: EnvironmentId;
++  id: string;
++  group: Initiative;
++  displayed: Initiative;
++  hidden: boolean;
++}
++
++/** One projection for rendering, shelf exclusion, selection and keyboard navigation. */
++export function initiativeLayout(
++  threads: readonly EnvironmentThreadShell[],
++  configs: ReadonlyMap<
++    EnvironmentId,
++    { initiativeGroups?: boolean; settings: { initiatives?: Initiatives } }
++  >,
++  scopedProjectKeys: ReadonlySet<string> | null,
++  collapsed: readonly string[],
++) {
++  const byKey = new Map(threads.map((thread) => [`${thread.environmentId}:${thread.id}`, thread]));
++  const keys = new Set<string>();
++  const visibleThreads: EnvironmentThreadShell[] = [];
++  const memberThreads: EnvironmentThreadShell[] = [];
++  const groups: InitiativeSidebarGroup[] = [];
++  for (const [environmentId, config] of [...configs].sort(([a], [b]) => a.localeCompare(b))) {
++    if (config.initiativeGroups !== true) continue;
++    for (const [id, group] of Object.entries(config.settings.initiatives ?? {})) {
++      const allIds = initiativeMembers(group);
++      for (const threadId of allIds) keys.add(`${environmentId}:${threadId}`);
++      const ids = allIds.filter((threadId) => {
++        const thread = byKey.get(`${environmentId}:${threadId}`);
++        return (
++          scopedProjectKeys === null ||
++          (thread !== undefined && scopedProjectKeys.has(`${environmentId}:${thread.projectId}`))
++        );
++      });
++      const displayed = {
++        ...group,
++        coordinatorThreadId:
++          group.coordinatorThreadId !== null && ids.includes(group.coordinatorThreadId)
++            ? group.coordinatorThreadId
++            : null,
++        memberThreadIds: ids,
++      };
++      const hidden = scopedProjectKeys !== null && ids.length === 0;
++      groups.push({ environmentId, id, group, displayed, hidden });
++      for (const threadId of ids) {
++        const thread = byKey.get(`${environmentId}:${threadId}`);
++        if (thread === undefined) continue;
++        memberThreads.push(thread);
++        if (!hidden && !collapsed.includes(`initiative:${environmentId}:${id}`))
++          visibleThreads.push(thread);
++      }
++    }
++  }
++  return { groups, keys, visibleThreads, memberThreads };
++}
+diff --git a/apps/web/src/components/InitiativeSidebar.tsx b/apps/web/src/components/InitiativeSidebar.tsx
+new file mode 100644
+index 00000000..12cc99cd
+--- /dev/null
++++ b/apps/web/src/components/InitiativeSidebar.tsx
+@@ -0,0 +1,336 @@
++import { randomUUID } from "../lib/utils";
++import { Fragment, useEffect, useState, type ReactNode } from "react";
++import type { EnvironmentId, Initiative, InitiativeChange, ThreadId } from "@t3tools/contracts";
++import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
++import * as Schema from "effect/Schema";
++import { ChevronDownIcon, EllipsisIcon, PlusIcon } from "lucide-react";
++import { appAtomRegistry } from "../rpc/atomRegistry";
++import { threadFamilies } from "../state/threads";
++import { useEnvironments } from "../state/environments";
++import { useUpdateEnvironmentSettings } from "../hooks/useSettings";
++import { useLocalStorage } from "../hooks/useLocalStorage";
++import { Button } from "./ui/button";
++import { Input } from "./ui/input";
++import {
++  Dialog,
++  DialogPopup,
++  DialogTitle,
++  DialogDescription,
++  DialogFooter,
++  DialogHeader,
++  DialogPanel,
++} from "./ui/dialog";
++import { Menu, MenuTrigger, MenuPopup, MenuItem } from "./ui/menu";
++import {
++  initiativeMembers,
++  initiativeSummary,
++  type InitiativeSidebarGroup,
++} from "./InitiativeSidebar.logic";
++
++const collapsedSchema = Schema.Array(Schema.String);
++
++interface GroupRef {
++  environmentId: EnvironmentId;
++  id: string;
++  group: Initiative;
++}
++interface Props {
++  threads: readonly EnvironmentThreadShell[];
++  groups: readonly InitiativeSidebarGroup[];
++  renderThread: (thread: EnvironmentThreadShell, parent: string) => ReactNode;
++  onOpen: (environmentId: EnvironmentId, threadId: ThreadId) => void;
++}
++
++function GroupEditor({
++  target,
++  threads,
++  onClose,
++}: {
++  target: GroupRef;
++  threads: Props["threads"];
++  onClose: () => void;
++}) {
++  const update = useUpdateEnvironmentSettings(target.environmentId);
++  const [name, setName] = useState(target.group.name);
++  const [coordinator, setCoordinator] = useState<string>(target.group.coordinatorThreadId ?? "");
++  const [members, setMembers] = useState(new Set(initiativeMembers(target.group)));
++  const [busy, setBusy] = useState(false);
++  const loaded = threads.filter(
++    (thread) => thread.environmentId === target.environmentId && thread.archivedAt === null,
++  );
++  const loadedIds = new Set(loaded.map((thread) => thread.id));
++  const candidates = [
++    ...loaded,
++    ...initiativeMembers(target.group)
++      .filter((id) => !loadedIds.has(id))
++      .map((id) => ({ id, title: `${id} (saved session)` })),
++  ];
++  const change = (mutation: InitiativeChange) =>
++    new Promise<void>((resolve, reject) =>
++      update(
++        { initiativeChange: mutation },
++        { onSaved: resolve, onFailed: () => reject(new Error("Initiative was not saved")) },
++      ),
++    );
++  const save = async () => {
++    if (!name.trim() || busy) return;
++    setBusy(true);
++    try {
++      if (target.group.name === "")
++        await change({
++          action: "create",
++          id: target.id,
++          name: name.trim(),
++          coordinatorThreadId: null,
++        });
++      else if (name.trim() !== target.group.name)
++        await change({ action: "rename", id: target.id, name: name.trim() });
++      const selected = new Set(members);
++      if (coordinator) selected.add(coordinator as ThreadId);
++      for (const id of initiativeMembers(target.group))
++        if (!selected.has(id)) await change({ action: "remove", id: target.id, threadId: id });
++      for (const id of selected)
++        if (!target.group.memberThreadIds.includes(id))
++          await change({ action: "assign", id: target.id, threadId: id });
++      if (coordinator !== (target.group.coordinatorThreadId ?? ""))
++        await change({
++          action: "coordinator",
++          id: target.id,
++          threadId: coordinator === "" ? null : (coordinator as ThreadId),
++        });
++      onClose();
++    } catch {
++      setBusy(false);
++    }
++  };
++  return (
++    <Dialog
++      open
++      onOpenChange={(open) => {
++        if (!open && !busy) onClose();
++      }}
++    >
++      <DialogPopup>
++        <DialogHeader>
++          <DialogTitle>
++            {target.group.name === "" ? "New initiative" : "Manage initiative"}
++          </DialogTitle>
++          <DialogDescription>
++            Group related work across repositories. Moving a session changes its display group;
++            sessions keep their current state.
++          </DialogDescription>
++        </DialogHeader>
++        <DialogPanel>
++          <label className="mt-4 grid gap-2 text-sm">
++            Name
++            <Input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} />
++          </label>
++          <label className="mt-4 grid gap-2 text-sm">
++            Project manager
++            <select
++              aria-label="Project manager"
++              className="rounded border border-input bg-background p-2"
++              value={coordinator}
++              onChange={(event) => setCoordinator(event.target.value)}
++            >
++              <option value="">No project manager</option>
++              {candidates.map((thread) => (
++                <option key={thread.id} value={thread.id}>
++                  {thread.title}
++                </option>
++              ))}
++            </select>
++          </label>
++          <fieldset className="mt-4 max-h-64 space-y-2 overflow-auto">
++            <legend className="mb-2 text-sm font-medium">Sessions</legend>
++            {candidates.map((thread) => (
++              <label key={thread.id} className="flex items-center gap-2 text-sm">
++                <input
++                  type="checkbox"
++                  checked={members.has(thread.id)}
++                  onChange={(event) =>
++                    setMembers((current) => {
++                      const next = new Set(current);
++                      if (event.target.checked) next.add(thread.id);
++                      else next.delete(thread.id);
++                      return next;
++                    })
++                  }
++                />
++                {thread.title}
++              </label>
++            ))}
++          </fieldset>
++        </DialogPanel>
++        <DialogFooter>
++          <Button variant="outline" disabled={busy} onClick={onClose}>
++            Cancel
++          </Button>
++          <Button disabled={busy || !name.trim()} onClick={() => void save()}>
++            {busy ? "Saving…" : "Save"}
++          </Button>
++        </DialogFooter>
++      </DialogPopup>
++    </Dialog>
++  );
++}
++
++function InitiativeGroup({
++  target,
++  threads,
++  renderThread,
++  onOpen,
++  onManage,
++}: Props & { target: InitiativeSidebarGroup; onManage: () => void }) {
++  const update = useUpdateEnvironmentSettings(target.environmentId);
++  const [collapsed, setCollapsed] = useLocalStorage(
++    "t3code:initiatives:collapsed",
++    [] as readonly string[],
++    collapsedSchema,
++  );
++  const key = `initiative:${target.environmentId}:${target.id}`;
++  const closed = collapsed.includes(key);
++  const byId = new Map(
++    threads
++      .filter((thread) => thread.environmentId === target.environmentId)
++      .map((thread) => [thread.id, thread]),
++  );
++  const ids = initiativeMembers(target.displayed);
++  const membersKey = JSON.stringify(initiativeMembers(target.group));
++  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- retains explicitly grouped saved sessions in the shared shell registry, including while collapsed
++  useEffect(() => {
++    const releases = (JSON.parse(membersKey) as ThreadId[]).map((id) =>
++      threadFamilies.mount(appAtomRegistry, target.environmentId, id),
++    );
++    return () => {
++      for (const release of releases) release();
++    };
++  }, [target.environmentId, membersKey]);
++  if (target.hidden) return null;
++  return (
++    <li
++      className="mt-3 list-none rounded-lg border border-sidebar-border"
++      data-initiative={target.id}
++    >
++      <div className="flex items-center gap-1 px-2 py-1">
++        <button
++          type="button"
++          data-sidebar-row={key}
++          aria-expanded={!closed}
++          className="min-w-0 flex-1 text-left"
++          onClick={() =>
++            setCollapsed((current) =>
++              closed ? current.filter((item) => item !== key) : [...current, key],
++            )
++          }
++        >
++          <span className="flex items-center gap-2 text-sm font-medium">
++            <ChevronDownIcon className={closed ? "size-3 -rotate-90" : "size-3"} />
++            {target.group.name}
++          </span>
++          <span className="block truncate pl-5 text-xs text-sidebar-muted-foreground">
++            {initiativeSummary(target.displayed, byId)}
++          </span>
++        </button>
++        <Menu>
++          <MenuTrigger
++            render={
++              <Button
++                variant="ghost-muted"
++                size="icon-xs"
++                aria-label={`Manage ${target.group.name}`}
++              />
++            }
++          >
++            <EllipsisIcon />
++          </MenuTrigger>
++          <MenuPopup>
++            <MenuItem onClick={onManage}>Manage initiative</MenuItem>
++            <MenuItem
++              onClick={() => update({ initiativeChange: { action: "delete", id: target.id } })}
++            >
++              Remove group; keep sessions
++            </MenuItem>
++          </MenuPopup>
++        </Menu>
++      </div>
++      {!closed && (
++        <ul className="border-t border-sidebar-border pl-3">
++          {ids.map((id) => {
++            const thread = byId.get(id);
++            return (
++              <Fragment key={id}>
++                {id === target.group.coordinatorThreadId && (
++                  <li className="px-3 pt-2 text-xs font-medium text-sidebar-muted-foreground">
++                    Project manager
++                  </li>
++                )}
++                {thread ? (
++                  renderThread(thread, key)
++                ) : (
++                  <li>
++                    <Button variant="ghost" onClick={() => onOpen(target.environmentId, id)}>
++                      Saved session · {id}
++                    </Button>
++                  </li>
++                )}
++              </Fragment>
++            );
++          })}
++          {ids.length === 0 && (
++            <li className="px-3 py-2 text-xs text-sidebar-muted-foreground">
++              Add a project manager and execution sessions.
++            </li>
++          )}
++        </ul>
++      )}
++    </li>
++  );
++}
++
++export function InitiativeSidebar(props: Props) {
++  const { environments } = useEnvironments();
++  const [editing, setEditing] = useState<GroupRef | null>(null);
++  return (
++    <>
++      {environments
++        .filter((environment) => environment.serverConfig?.initiativeGroups === true)
++        .map((environment) => (
++          <Fragment key={environment.environmentId}>
++            <li className="list-none">
++              <Button
++                variant="ghost-muted"
++                size="sm"
++                onClick={() =>
++                  setEditing({
++                    environmentId: environment.environmentId,
++                    id: randomUUID(),
++                    group: { name: "", coordinatorThreadId: null, memberThreadIds: [] },
++                  })
++                }
++              >
++                <PlusIcon />
++                New initiative{environments.length > 1 ? ` · ${environment.label}` : ""}
++              </Button>
++            </li>
++          </Fragment>
++        ))}
++      {props.groups.map((target) => (
++        <InitiativeGroup
++          key={`${target.environmentId}:${target.id}`}
++          {...props}
++          target={target}
++          onManage={() => setEditing(target)}
++        />
++      ))}
++      {editing !== null && (
++        <GroupEditor
++          key={`${editing.environmentId}:${editing.id}`}
++          target={editing}
++          threads={props.threads}
++          onClose={() => setEditing(null)}
++        />
++      )}
++    </>
++  );
++}
+diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
+new file mode 100644
+index 00000000..949e410b
+--- /dev/null
++++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
+@@ -0,0 +1,133 @@
++import { createMemoryHistory } from "@tanstack/react-router";
++import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
++import { ProjectId, type ThreadId, type OrchestrationProjectShell } from "@t3tools/contracts";
++import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
++import type * as Context from "effect/Context";
++import { expect, it, vi } from "vite-plus/test";
++import { page, userEvent } from "vite-plus/test/browser";
++
++import { AppRoot } from "~/AppRoot";
++import "~/components/ChatView";
++import "~/index.css";
++import { __setClientSettingsForTests } from "~/hooks/useSettings";
++import { getRouter } from "~/router";
++import { useThreadSelectionStore } from "~/threadSelectionStore";
++import {
++  ENVIRONMENT_ID,
++  PROJECT_ID,
++  installFakeEnvironment,
++  threadWithHistory,
++  type FakeDriver,
++} from "../../test/fakeEnvironment";
++import { act, render } from "../../test/render";
++
++vi.mock("../../../../packages/client-runtime/src/connection/driver.ts", async (importOriginal) => {
++  const [actual, { fakeDriver }, Layer] = await Promise.all([
++    importOriginal<{ readonly ConnectionDriver: Context.Key<unknown, FakeDriver> }>(),
++    import("../../test/fakeEnvironment"),
++    import("effect/Layer"),
++  ]);
++  return { ...actual, layer: Layer.succeed(actual.ConnectionDriver, fakeDriver) };
++});
++
++vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
++  ...(await original()),
++  trackRpcRequestSent: () => {},
++}));
++
++const settings = () => {
++  localStorage.clear();
++  useThreadSelectionStore.getState().clearSelection();
++  __setClientSettingsForTests({
++    ...DEFAULT_CLIENT_SETTINGS,
++    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
++  });
++};
++const key = (id: ThreadId) => scopedThreadKey(scopeThreadRef(ENVIRONMENT_ID, id));
++const selected = () => [...useThreadSelectionStore.getState().selectedThreadKeys];
++const row = (title: string) => page.getByRole("button", { name: new RegExp(title) }).first();
++const controlClick = async (title: string) => {
++  const modifier = navigator.platform.includes("Mac") ? "Meta" : "Control";
++  await userEvent.keyboard(`{${modifier}>}`);
++  try {
++    await userEvent.click(row(title));
++  } finally {
++    await userEvent.keyboard(`{/${modifier}}`);
++  }
++};
++const shiftClick = async (title: string) => {
++  await userEvent.keyboard("{Shift>}");
++  try {
++    await userEvent.click(row(title));
++  } finally {
++    await userEvent.keyboard("{/Shift}");
++  }
++};
++
++it("selects visible grouped ranges, excludes collapsed members and shelf counts, and honors project scope", async () => {
++  settings();
++  const a = threadWithHistory("group-a", 1);
++  const flat = threadWithHistory("flat-between", 1);
++  const b = { ...threadWithHistory("group-b", 1), settled: true as const };
++  const hidden = threadWithHistory("collapsed-worker", 1);
++  const foreign = {
++    ...threadWithHistory("foreign-worker", 1),
++    projectId: ProjectId.make("foreign-project"),
++  };
++  const project = (id: ProjectId, title: string): OrchestrationProjectShell => ({
++    id,
++    title,
++    workspaceRoot: `/workspace/${title}`,
++    repositoryIdentity: null,
++    defaultModelSelection: null,
++    scripts: [],
++    createdAt: "2026-03-17T19:12:28.000Z",
++    updatedAt: "2026-03-17T19:12:28.000Z",
++  });
++  using _environment = installFakeEnvironment([a, flat, b, hidden, foreign], {
++    initiativeGroups: true,
++    projects: [
++      project(PROJECT_ID, "local-repository"),
++      project(foreign.projectId, "foreign-repository"),
++    ],
++    settings: {
++      initiatives: {
++        routing: {
++          name: "Routing",
++          coordinatorThreadId: a.id,
++          memberThreadIds: [a.id, b.id, foreign.id],
++        },
++        other: {
++          name: "Other work",
++          coordinatorThreadId: hidden.id,
++          memberThreadIds: [hidden.id],
++        },
++      },
++    },
++  });
++  await page.viewport(1400, 1100);
++  const router = getRouter(createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${a.id}`] }));
++  await router.load();
++  await using _app = await render(<AppRoot router={router} />, { router: false });
++  await expect.element(row(b.title)).toBeVisible();
++  await expect
++    .element(page.getByTestId("sidebar-settled-shelf-toggle"))
++    .toHaveTextContent("Settled0");
++  await controlClick(a.title);
++  await shiftClick(b.title);
++  expect(selected()).toEqual([key(a.id), key(b.id)]);
++
++  await userEvent.click(page.getByRole("button", { name: /^Other work/ }));
++  await expect.element(row(hidden.title)).not.toBeInTheDocument();
++  await act(() => useThreadSelectionStore.getState().clearSelection());
++  await controlClick(a.title);
++  await shiftClick(flat.title);
++  expect(selected()).toEqual([key(a.id), key(b.id), key(foreign.id), key(flat.id)]);
++  await expect.element(row(foreign.title)).toBeVisible();
++  await userEvent.click(
++    page.getByRole("combobox", { name: "Filter threads by project", exact: true }),
++  );
++  await userEvent.click(page.getByRole("option", { name: "local-repository", exact: true }));
++  await expect.element(row(a.title)).toBeVisible();
++  await expect.element(row(foreign.title)).not.toBeInTheDocument();
++});
+diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
+index 8fa58d84..8fc1359a 100644
+--- a/apps/web/src/components/Sidebar.tsx
++++ b/apps/web/src/components/Sidebar.tsx
+@@ -1,3 +1,5 @@
++import { InitiativeSidebar } from "./InitiativeSidebar";
++import { initiativeLayout } from "./InitiativeSidebar.logic";
+ import { attachSidebarTree } from "../lib/sidebarTree";
+ import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
+ import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
+@@ -370,6 +372,8 @@ function threadShellKey(thread: Pick<SidebarThreadSummary, "environmentId" | "id
+ }
+ 
+ const NO_DRAGGED_ORDER: readonly string[] = [];
++const INITIATIVE_COLLAPSED_SCHEMA = Schema.Array(Schema.String);
++
+ const NO_DRAGGED_ORDERS: {
+   readonly settledOrder: readonly string[];
+   readonly activeOrder: readonly string[] | undefined;
+@@ -475,8 +479,19 @@ function useSidebarThreads(input: {
+   const settledVisibleCount =
+     settledTail.scopeKey === projectScopeKey ? settledTail.count : SETTLED_TAIL_INITIAL_COUNT;
+ 
+-  const partition = partitionSidebarThreads({
++  const [collapsedInitiatives] = useLocalStorage(
++    "t3code:initiatives:collapsed",
++    [] as readonly string[],
++    INITIATIVE_COLLAPSED_SCHEMA,
++  );
++  const initiatives = initiativeLayout(
+     threads,
++    serverConfigs,
++    scopedProjectKeys,
++    collapsedInitiatives,
++  );
++  const partition = partitionSidebarThreads({
++    threads: threads.filter((thread) => !initiatives.keys.has(threadShellKey(thread))),
+     scopedProjectKeys,
+     delegatedUnderParent,
+     serverConfigs,
+@@ -498,7 +513,8 @@ function useSidebarThreads(input: {
+   const listedSettledThreads = settledThreads.filter(olderSettledShelf.isListed);
+   useOlderSettledShelfGrowth(olderSettledShelf, listedSettledThreads);
+   const settledCount =
+-    settledThreads.length + olderSettledShelf.unloadedCount(partition.visibleThreads);
++    settledThreads.length +
++    olderSettledShelf.unloadedCount([...partition.visibleThreads, ...initiatives.memberThreads]);
+   const visibleSettledThreads = (() => {
+     const visible = listedSettledThreads.slice(0, settledVisibleCount);
+     if (
+@@ -542,6 +558,7 @@ function useSidebarThreads(input: {
+           };
+         });
+   const orderedThreads = [
++    ...initiatives.visibleThreads,
+     ...pinnedThreads,
+     ...(projectFolders === null
+       ? activeThreads
+@@ -560,11 +577,22 @@ function useSidebarThreads(input: {
+   ] as const) {
+     for (const thread of list) sectionByThreadKey.set(threadShellKey(thread), section);
+   }
++  for (const thread of initiatives.visibleThreads)
++    sectionByThreadKey.set(
++      threadShellKey(thread),
++      resolveSidebarThreadSection({
++        snoozed: effectiveSnoozed(thread, { now: partition.snoozeNow }),
++        settled: thread.settledOverride === "settled",
++        pinned: thread.pinnedAt != null,
++      }),
++    );
+   return {
+     ...partition,
++    initiatives,
+     threads,
+     workingShelfEnabled,
+     searchableThreads: [
++      ...initiatives.memberThreads,
+       ...pinnedThreads,
+       ...activeThreads,
+       ...workingThreads,
+@@ -1301,6 +1329,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+ 
+   const {
+     workingShelfEnabled,
++    initiatives,
+     pinnedThreads,
+     draggableThreadKeys,
+     activeReorderableThreadKeys,
+@@ -3338,6 +3367,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                             sortableId={threadKey}
+                             contextDrag={isContextDrag}
+                             sortableDisabled={
++                              folderRow?.startsWith("initiative:") === true ||
+                               renamingThreadKey === threadKey ||
+                               !draggableThreadKeys.has(threadKey) ||
+                               optimisticDrop !== null
+@@ -3445,6 +3475,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                           onDraftContextMenu={handleDraftContextMenu}
+                         />,
+                       ];
++                      items.push(
++                        <InitiativeSidebar
++                          key="initiatives"
++                          threads={threads}
++                          groups={initiatives.groups}
++                          renderThread={(thread, parent) =>
++                            renderThreadRow(
++                              thread,
++                              sectionByThreadKey.get(threadShellKey(thread)) ?? "active",
++                              parent,
++                            )
++                          }
++                          onOpen={(environmentId, id) =>
++                            navigateToThread(scopeThreadRef(environmentId, id))
++                          }
++                        />,
++                      );
+                       for (const item of sidebarListItems) {
+                         if (item.kind === "thread") {
+                           // Folders draw active rows in their own place below.
+diff --git a/apps/web/test/fakeEnvironment.ts b/apps/web/test/fakeEnvironment.ts
+index e878a396..881832db 100644
+--- a/apps/web/test/fakeEnvironment.ts
++++ b/apps/web/test/fakeEnvironment.ts
+@@ -109,8 +109,8 @@ const baseServerConfig: ServerConfig = {
+ // A server only leaves threads out of the shell when it serves their families.
+ const serverConfig = (): ServerConfig =>
+   threads.some((thread) => thread.olderSettled)
+-    ? { ...baseServerConfig, shellThreadFamilies: true }
+-    : baseServerConfig;
++    ? { ...baseServerConfig, ...configOverrides, shellThreadFamilies: true }
++    : { ...baseServerConfig, ...configOverrides };
+ 
+ const project: OrchestrationProjectShell = {
+   id: PROJECT_ID,
+@@ -192,6 +192,8 @@ function run(threadId: ThreadId, id: RunId, ordinal: number, userMessageId: stri
+ }
+ 
+ export interface FakeThread {
++  readonly projectId?: ProjectId;
++  readonly settled?: true;
+   /** Makes this a side chat of that thread. */
+   readonly sideChatOf?: ThreadId;
+   /** Makes this an older settled thread the shell leaves out; only its family read returns it. */
+@@ -229,7 +231,7 @@ function shellOf(thread: FakeThread): OrchestrationV2ThreadShell {
+   const latest = thread.runs.at(-1);
+   return {
+     id: thread.id,
+-    projectId: PROJECT_ID,
++    projectId: thread.projectId ?? PROJECT_ID,
+     title: thread.title,
+     providerInstanceId: CODEX,
+     modelSelection: MODEL,
+@@ -260,8 +262,8 @@ function shellOf(thread: FakeThread): OrchestrationV2ThreadShell {
+     createdAt: AT,
+     updatedAt: AT,
+     archivedAt: null,
+-    settledOverride: thread.olderSettled ? "settled" : null,
+-    settledAt: thread.olderSettled ? AT : null,
++    settledOverride: thread.olderSettled || thread.settled ? "settled" : null,
++    settledAt: thread.olderSettled || thread.settled ? AT : null,
+     lastVisitedAt: AT,
+     deletedAt: null,
+   };
+@@ -329,6 +331,8 @@ const json = (body: unknown, status = 200) =>
+ const threadSubscribers = new Map<string, Queue.Queue<OrchestrationV2ThreadStreamItem>>();
+ let terminalMetadataSubscriber: Queue.Queue<TerminalMetadataStreamEvent> | null = null;
+ let threads: ReadonlyArray<FakeThread> = [];
++let projects: ReadonlyArray<OrchestrationProjectShell> = [project];
++let configOverrides: Partial<ServerConfig> = {};
+ let dispatched: OrchestrationV2Command[] = [];
+ let acceptCommands = false;
+ let sequence = 1;
+@@ -369,7 +373,7 @@ const handlers: Record<string, (input: never) => unknown> = {
+         snapshot: {
+           schemaVersion: 1,
+           snapshotSequence: sequence,
+-          projects: [project],
++          projects,
+           threads: threads.filter((thread) => !thread.olderSettled).map(shellOf),
+           archivedThreads: [],
+         },
+@@ -465,9 +469,23 @@ const encodedDescriptor = Schema.encodeSync(ExecutionEnvironmentDescriptor)(
+ /** Serves the environment's HTTP API and these threads until disposed. */
+ export function installFakeEnvironment(
+   fixtures: ReadonlyArray<FakeThread>,
+-  options?: { readonly acceptCommands?: boolean },
++  options?: {
++    readonly acceptCommands?: boolean;
++    readonly settings?: Partial<ServerConfig["settings"]>;
++    readonly initiativeGroups?: boolean;
++    readonly projects?: ReadonlyArray<OrchestrationProjectShell>;
++  },
+ ): Disposable {
+   threads = fixtures;
++  projects = options?.projects ?? [project];
++  configOverrides = {
++    ...(options?.settings === undefined
++      ? {}
++      : { settings: { ...baseServerConfig.settings, ...options.settings } }),
++    ...(options?.initiativeGroups === undefined
++      ? {}
++      : { initiativeGroups: options.initiativeGroups }),
++  };
+   dispatched = [];
+   acceptCommands = options?.acceptCommands === true;
+   globalThis.fetch = async (input, init) => {
+@@ -491,6 +509,8 @@ export function installFakeEnvironment(
+     [Symbol.dispose]: () => {
+       globalThis.fetch = realFetch;
+       threads = [];
++      projects = [project];
++      configOverrides = {};
+       dispatched = [];
+       acceptCommands = false;
+     },
+diff --git a/packages/contracts/src/orchestratorMcp.ts b/packages/contracts/src/orchestratorMcp.ts
+index d1bb9961..3865a885 100644
+--- a/packages/contracts/src/orchestratorMcp.ts
++++ b/packages/contracts/src/orchestratorMcp.ts
+@@ -295,6 +295,8 @@ export type OrchestratorMcpCreatedThreadStatus = typeof OrchestratorMcpCreatedTh
+ 
+ export const OrchestratorMcpCreatedThread = Schema.Struct({
+   threadId: ThreadId,
++  initiativeId: Schema.optional(Schema.String),
++  initiativeWarning: Schema.optional(Schema.String),
+   link: Schema.optional(Schema.String),
+   runId: Schema.NullOr(RunId),
+   status: OrchestratorMcpCreatedThreadStatus,
+diff --git a/packages/contracts/src/server.ts b/packages/contracts/src/server.ts
+index 40a1aa8b..82d9bf20 100644
+--- a/packages/contracts/src/server.ts
++++ b/packages/contracts/src/server.ts
+@@ -629,6 +629,8 @@ export const ServerConfig = Schema.Struct({
+    * `getThreadFamily` and `getWorktreeThreadIds` serve the rows it leaves out.
+    */
+   shellThreadFamilies: Schema.optionalKey(Schema.Boolean),
++  /** Persistent initiative display groups and native grouping tools. */
++  initiativeGroups: Schema.optionalKey(Schema.Boolean),
+   threadLinkMetadata: Schema.optionalKey(Schema.Boolean),
+   /**
+    * The shell can leave older settled threads out of snapshots (`omitOlderSettled`), and
+diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
+index 34621399..395971a1 100644
+--- a/packages/contracts/src/settings.ts
++++ b/packages/contracts/src/settings.ts
+@@ -1337,7 +1337,47 @@ export const CloudSpeechCredentials = Schema.Struct({
+   openrouter: CloudSpeechCredential,
+ });
+ 
++export const InitiativeId = TrimmedNonEmptyString.check(
++  Schema.isPattern(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/),
++);
++export const Initiative = Schema.Struct({
++  name: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
++  coordinatorThreadId: Schema.NullOr(ThreadId),
++  memberThreadIds: Schema.Array(ThreadId),
++});
++export type Initiative = typeof Initiative.Type;
++export const Initiatives = Schema.Record(InitiativeId, Initiative);
++export type Initiatives = typeof Initiatives.Type;
++export const InitiativeChange = Schema.Union([
++  Schema.Struct({
++    action: Schema.Literal("create"),
++    id: InitiativeId,
++    name: Initiative.fields.name,
++    coordinatorThreadId: Schema.NullOr(ThreadId),
++  }),
++  Schema.Struct({
++    action: Schema.Literal("rename"),
++    id: InitiativeId,
++    name: Initiative.fields.name,
++  }),
++  Schema.Struct({
++    action: Schema.Literal("assign"),
++    id: InitiativeId,
++    threadId: ThreadId,
++    onlyIfUngrouped: Schema.optionalKey(Schema.Boolean),
++  }),
++  Schema.Struct({ action: Schema.Literal("remove"), id: InitiativeId, threadId: ThreadId }),
++  Schema.Struct({
++    action: Schema.Literal("coordinator"),
++    id: InitiativeId,
++    threadId: Schema.NullOr(ThreadId),
++  }),
++  Schema.Struct({ action: Schema.Literal("delete"), id: InitiativeId }),
++]);
++export type InitiativeChange = typeof InitiativeChange.Type;
++
+ export const ServerSettings = Schema.Struct({
++  initiatives: Initiatives.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
+   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+   providerModelPreferences: Schema.NullOr(ProviderModelPreferences).pipe(
+@@ -1756,6 +1796,7 @@ const ModelSelectionPatch = Schema.Struct({
+ });
+ 
+ export const ServerSettingsPatch = Schema.Struct({
++  initiativeChange: Schema.optionalKey(InitiativeChange),
+   setModelFavorites: Schema.optionalKey(
+     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
+   ),
+diff --git a/packages/shared/package.json b/packages/shared/package.json
+index f5f76923..07dfd2b5 100644
+--- a/packages/shared/package.json
++++ b/packages/shared/package.json
+@@ -546,6 +546,10 @@
+     "./speech": {
+       "types": "./src/speech.ts",
+       "import": "./src/speech.ts"
++    },
++    "./initiatives": {
++      "types": "./src/initiatives.ts",
++      "import": "./src/initiatives.ts"
+     }
+   },
+   "scripts": {
+diff --git a/packages/shared/src/initiatives.test.ts b/packages/shared/src/initiatives.test.ts
+new file mode 100644
+index 00000000..80e688df
+--- /dev/null
++++ b/packages/shared/src/initiatives.test.ts
+@@ -0,0 +1,75 @@
++import { describe, expect, it } from "vite-plus/test";
++import { DEFAULT_SERVER_SETTINGS, ThreadId, type Initiatives } from "@t3tools/contracts";
++import { applyInitiativeChange, initiativeForThread } from "./initiatives.ts";
++import { applyServerSettingsPatch } from "./serverSettings.ts";
++const pm = ThreadId.make("pm");
++const api = ThreadId.make("api");
++const ui = ThreadId.make("ui");
++const initial = (): Initiatives =>
++  applyInitiativeChange(
++    {},
++    { action: "create", id: "routing", name: "Routing retirement", coordinatorThreadId: pm },
++  );
++describe("initiative relationships", () => {
++  it("creates a coordinator once and keeps independent additions under serialized settings patches", () => {
++    let settings = { ...DEFAULT_SERVER_SETTINGS, initiatives: initial() };
++    for (const threadId of [api, ui, api])
++      settings = applyServerSettingsPatch(settings, {
++        initiativeChange: { action: "assign", id: "routing", threadId },
++      });
++    expect(settings.initiatives.routing?.memberThreadIds).toEqual([pm, api, ui]);
++    expect(settings.initiatives.routing?.coordinatorThreadId).toBe(pm);
++    expect(initiativeForThread(settings.initiatives, ui)).toBe("routing");
++    expect(initiativeForThread(settings.initiatives, ThreadId.make("outside"))).toBeUndefined();
++  });
++  it("moves only the explicitly selected member and preserves the old group's other members", () => {
++    let groups = applyInitiativeChange(initial(), {
++      action: "assign",
++      id: "routing",
++      threadId: api,
++    });
++    groups = applyInitiativeChange(groups, {
++      action: "create",
++      id: "other",
++      name: "Other initiative",
++      coordinatorThreadId: null,
++    });
++    groups = applyInitiativeChange(groups, { action: "coordinator", id: "other", threadId: pm });
++    expect(groups.routing).toMatchObject({ coordinatorThreadId: null, memberThreadIds: [api] });
++    expect(groups.other).toMatchObject({ coordinatorThreadId: pm, memberThreadIds: [pm] });
++  });
++  it("renames, removes and deletes display relationships without changing unrelated settings", () => {
++    let settings = { ...DEFAULT_SERVER_SETTINGS, initiatives: initial() };
++    const before = settings.providerInstances;
++    settings = applyServerSettingsPatch(settings, {
++      initiativeChange: { action: "rename", id: "routing", name: "New name" },
++    });
++    expect(settings.initiatives.routing?.name).toBe("New name");
++    settings = applyServerSettingsPatch(settings, {
++      initiativeChange: { action: "remove", id: "routing", threadId: pm },
++    });
++    expect(settings.initiatives.routing).toMatchObject({
++      coordinatorThreadId: null,
++      memberThreadIds: [],
++    });
++    settings = applyServerSettingsPatch(settings, {
++      initiativeChange: { action: "delete", id: "routing" },
++    });
++    expect(settings.initiatives).toEqual({});
++    expect(settings.providerInstances).toEqual(before);
++  });
++  it("does not resurrect a deleted group or replace an existing group's identity on retry", () => {
++    const groups = initial();
++    expect(
++      applyInitiativeChange(groups, {
++        action: "create",
++        id: "routing",
++        name: "Conflicting",
++        coordinatorThreadId: null,
++      }),
++    ).toBe(groups);
++    expect(applyInitiativeChange({}, { action: "assign", id: "routing", threadId: api })).toEqual(
++      {},
++    );
++  });
++});
+diff --git a/packages/shared/src/initiatives.ts b/packages/shared/src/initiatives.ts
+new file mode 100644
+index 00000000..eb2e5018
+--- /dev/null
++++ b/packages/shared/src/initiatives.ts
+@@ -0,0 +1,74 @@
++import type { InitiativeChange, Initiatives, ThreadId } from "@t3tools/contracts";
++
++export function initiativeForThread(
++  initiatives: Initiatives,
++  threadId: ThreadId,
++): string | undefined {
++  return Object.entries(initiatives).find(
++    ([, group]) =>
++      group.coordinatorThreadId === threadId || group.memberThreadIds.includes(threadId),
++  )?.[0];
++}
++
++/** Applied by the settings service under its write lock; each call changes one relationship. */
++export function applyInitiativeChange(current: Initiatives, change: InitiativeChange): Initiatives {
++  const next = { ...current };
++  const group = Object.hasOwn(current, change.id) ? current[change.id] : undefined;
++  if (change.action === "delete") {
++    delete next[change.id];
++    return next;
++  }
++  if (change.action === "create") {
++    if (group !== undefined) return current;
++    next[change.id] = { name: change.name, coordinatorThreadId: null, memberThreadIds: [] };
++    return change.coordinatorThreadId === null
++      ? next
++      : applyInitiativeChange(next, {
++          action: "coordinator",
++          id: change.id,
++          threadId: change.coordinatorThreadId,
++        });
++  }
++  if (group === undefined) return current;
++  if (change.action === "rename") {
++    next[change.id] = { ...group, name: change.name };
++    return next;
++  }
++  if (change.action === "remove") {
++    next[change.id] = {
++      ...group,
++      coordinatorThreadId:
++        group.coordinatorThreadId === change.threadId ? null : group.coordinatorThreadId,
++      memberThreadIds: group.memberThreadIds.filter((id) => id !== change.threadId),
++    };
++    return next;
++  }
++  if (
++    change.action === "assign" &&
++    change.onlyIfUngrouped === true &&
++    initiativeForThread(current, change.threadId) !== undefined
++  )
++    return current;
++  if (change.threadId !== null) {
++    // An explicit move changes display membership, never session lifecycle or management authority.
++    for (const [id, other] of Object.entries(next)) {
++      if (id === change.id) continue;
++      next[id] = {
++        ...other,
++        coordinatorThreadId:
++          other.coordinatorThreadId === change.threadId ? null : other.coordinatorThreadId,
++        memberThreadIds: other.memberThreadIds.filter((member) => member !== change.threadId),
++      };
++    }
++  }
++  next[change.id] = {
++    ...group,
++    coordinatorThreadId:
++      change.action === "coordinator" ? change.threadId : group.coordinatorThreadId,
++    memberThreadIds:
++      change.threadId === null
++        ? group.memberThreadIds
++        : [...new Set([...group.memberThreadIds, change.threadId])],
++  };
++  return next;
++}
+diff --git a/packages/shared/src/serverSettings.ts b/packages/shared/src/serverSettings.ts
+index 5e54ccb7..ac61b161 100644
+--- a/packages/shared/src/serverSettings.ts
++++ b/packages/shared/src/serverSettings.ts
+@@ -28,6 +28,7 @@ import * as Option from "effect/Option";
+ import * as Predicate from "effect/Predicate";
+ import * as Schema from "effect/Schema";
+ import { deepMerge } from "./Struct.ts";
++import { applyInitiativeChange } from "./initiatives.ts";
+ import { fromLenientJson } from "./schemaJson.ts";
+ import { createModelSelection, readCustomModelEntries } from "./model.ts";
+ import {
+@@ -387,6 +388,7 @@ export function applyServerSettingsPatch(
+   const patch = translateLegacyProjectOverridePatch(current, rawPatch);
+   const selectionPatch = patch.textGenerationModelSelection;
+   const {
++    initiativeChange,
+     migrateModelPreferences,
+     setModelFavorites,
+     setModelsHidden,
+@@ -501,6 +503,10 @@ export function applyServerSettingsPatch(
+   const next = deepMerge(current, patchForMerge);
+   const nextWithReplacementsBase = {
+     ...next,
++    initiatives:
++      initiativeChange === undefined
++        ? current.initiatives
++        : applyInitiativeChange(current.initiatives, initiativeChange),
+     favorites,
+     providerModelPreferences: nextModelPreferences,
+     ...(worktreeCleanupPatch === undefined
