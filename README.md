@@ -2,7 +2,7 @@
 
 Focused initiative grouping patches for the official T3 Code Beta on macOS. The official application stays signed and unchanged; a separate launcher loads the rebuilt JavaScript into it.
 
-The patch adds named, collapsible initiatives spanning repository projects in one T3 environment. Select a project manager, add execution sessions, and keep them together while working, idle, snoozed, or settled. Headers summarize their status. Manage initiative moves or removes display relationships; removing a group keeps every session.
+The patch adds named, collapsible initiatives spanning repository projects in one T3 environment. Select a project manager, add execution sessions, and keep them together while working, idle, snoozed, or settled. Headers summarize their status. The shaded header collapses the group; a person icon marks the PM and tree connectors lead to its execution sessions. Right-click a session to start an initiative with it as PM, or add, move, or remove its display membership. Removing a group keeps every session.
 
 The native `t3_initiative_list` and `t3_initiative_update` tools expose those same explicit relationships. New single and batch launches inherit their caller's display group; replaying a launch preserves subsequent moves and removals. A grouping failure returns `initiativeWarning` alongside the accepted launch, so repair the exact thread's display relationship rather than launching another one. UI groups do not adopt sessions into Builder or dispatcher's management registry.
 
