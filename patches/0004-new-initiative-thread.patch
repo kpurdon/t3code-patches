@@ -1110,10 +1110,10 @@ index a70755d002..a3571e5cb2 100644
    globalThis.fetch = async (input, init) => {
      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
 diff --git a/scripts/scenarios/initiative-save.e2e.ts b/scripts/scenarios/initiative-save.e2e.ts
-index 19b445a163..51b99dda1e 100644
+index 19b445a163..15de757e31 100644
 --- a/scripts/scenarios/initiative-save.e2e.ts
 +++ b/scripts/scenarios/initiative-save.e2e.ts
-@@ -25,5 +25,34 @@ test(
+@@ -25,5 +25,35 @@ test(
      ).toBeVisible();
      await app.screenshot("initiative-saved");
      await expect(screen.getByText("No threads yet", { exact: true })).toBeHidden();
@@ -1141,6 +1141,7 @@ index 19b445a163..51b99dda1e 100644
 +  await app.open("/");
 +  await expect(screen.getByRole("button", { name: /New thread,/ })).toBeVisible();
 +  await screen.getByRole("button", "Manage Thread creation", { exact: true }).tap();
++  await screen.getByRole("menuitem", "Manage initiative", { exact: true }).tap();
 +  await screen.getByRole("checkbox", "New thread", { exact: true }).uncheck();
 +  await screen.getByRole("button", "Save").tap();
 +  await expect(screen.getByText("Other sessions", { exact: true })).toBeVisible();
