@@ -1,0 +1,384 @@
+diff --git a/apps/web/src/components/InitiativeSidebar.browser.test.tsx b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
+index 916595c5..2da2f6a3 100644
+--- a/apps/web/src/components/InitiativeSidebar.browser.test.tsx
++++ b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
+@@ -9,12 +9,15 @@ import { applyInitiativeChange } from "@t3tools/shared/initiatives";
+ import "~/index.css";
+ import { expect, it, vi } from "vite-plus/test";
+ import { page } from "vite-plus/test/browser";
+-import { render } from "../../test/render";
++import { act, render } from "../../test/render";
+ 
+ const state = vi.hoisted(() => ({
+   initiatives: {} as Initiatives,
+   changes: [] as InitiativeChange[],
+   supported: true,
++  holdSaves: false,
++  failNextSave: false,
++  pendingSaves: [] as Array<{ onSaved?: () => void; onFailed?: () => void }>,
+   mount: vi.fn(
+     (_registry: unknown, _environmentId: unknown, _threadId: unknown) => () => undefined,
+   ),
+@@ -37,9 +40,21 @@ vi.mock(import("../state/threads"), () => ({ threadFamilies: { mount: state.moun
+ vi.mock(import("../rpc/atomRegistry"), () => ({ appAtomRegistry: {} }) as never);
+ vi.mock(import("../hooks/useSettings"), () => ({
+   useUpdateEnvironmentSettings: (() =>
+-    (patch: { initiativeChange: InitiativeChange }, callbacks?: { onSaved?: () => void }) => {
++    (
++      patch: { initiativeChange: InitiativeChange },
++      callbacks?: { onSaved?: () => void; onFailed?: () => void },
++    ) => {
+       state.changes.push(patch.initiativeChange);
++      if (state.failNextSave) {
++        state.failNextSave = false;
++        callbacks?.onFailed?.();
++        return;
++      }
+       state.initiatives = applyInitiativeChange(state.initiatives, patch.initiativeChange);
++      if (state.holdSaves) {
++        state.pendingSaves.push(callbacks ?? {});
++        return;
++      }
+       callbacks?.onSaved?.();
+     }) as never,
+ }));
+@@ -77,6 +92,9 @@ const view = () => (
+ function setup() {
+   state.supported = true;
+   state.changes = [];
++  state.holdSaves = false;
++  state.failNextSave = false;
++  state.pendingSaves = [];
+   state.mount.mockClear();
+   state.initiatives = {
+     routing: { name: "Routing", coordinatorThreadId: pm, memberThreadIds: [pm, api] },
+@@ -129,3 +147,41 @@ it("does not expose grouping controls for an unpatched environment", async () =>
+     .not.toBeInTheDocument();
+   expect(state.mount).not.toHaveBeenCalled();
+ });
++
++it.each(["Cancel", "Close"])(
++  "allows %s during a pending save and stops subsequent membership writes",
++  async (dismiss) => {
++    setup();
++    state.initiatives = {};
++    state.holdSaves = true;
++    await using screen = await render(view());
++    await screen.getByRole("button", { name: "New initiative" }).click();
++    await page.getByRole("textbox", { name: "Name" }).fill("Pending initiative");
++    await page.getByRole("combobox", { name: "Project manager" }).selectOptions(pm);
++    await page.getByRole("button", { name: "Save", exact: true }).click();
++    await expect.element(page.getByRole("button", { name: "Saving…" })).toBeDisabled();
++    await expect.element(page.getByRole("button", { name: "Cancel", exact: true })).toBeEnabled();
++    await expect.element(page.getByRole("button", { name: "Close", exact: true })).toBeEnabled();
++    await page.getByRole("button", { name: dismiss, exact: true }).click();
++    await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
++    await act(() => state.pendingSaves[0]?.onSaved?.());
++    expect(state.changes.map((change) => change.action)).toEqual(["create"]);
++  },
++);
++
++it("releases the saving state after a failed write so the user can retry", async () => {
++  setup();
++  state.initiatives = {};
++  state.failNextSave = true;
++  await using screen = await render(view());
++  await screen.getByRole("button", { name: "New initiative" }).click();
++  await page.getByRole("textbox", { name: "Name" }).fill("Retry initiative");
++  await page.getByRole("combobox", { name: "Project manager" }).selectOptions(pm);
++  await page.getByRole("button", { name: "Save", exact: true }).click();
++  await expect.element(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
++  await page.getByRole("button", { name: "Save", exact: true }).click();
++  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
++  expect(Object.values(state.initiatives)).toEqual([
++    { name: "Retry initiative", coordinatorThreadId: pm, memberThreadIds: [pm] },
++  ]);
++});
+diff --git a/apps/web/src/components/InitiativeSidebar.tsx b/apps/web/src/components/InitiativeSidebar.tsx
+index 12cc99cd..1a2d6720 100644
+--- a/apps/web/src/components/InitiativeSidebar.tsx
++++ b/apps/web/src/components/InitiativeSidebar.tsx
+@@ -1,5 +1,5 @@
+ import { randomUUID } from "../lib/utils";
+-import { Fragment, useEffect, useState, type ReactNode } from "react";
++import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+ import type { EnvironmentId, Initiative, InitiativeChange, ThreadId } from "@t3tools/contracts";
+ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+ import * as Schema from "effect/Schema";
+@@ -55,6 +55,11 @@ function GroupEditor({
+   const [coordinator, setCoordinator] = useState<string>(target.group.coordinatorThreadId ?? "");
+   const [members, setMembers] = useState(new Set(initiativeMembers(target.group)));
+   const [busy, setBusy] = useState(false);
++  const closed = useRef(false);
++  const dismiss = () => {
++    closed.current = true;
++    onClose();
++  };
+   const loaded = threads.filter(
+     (thread) => thread.environmentId === target.environmentId && thread.archivedAt === null,
+   );
+@@ -66,12 +71,16 @@ function GroupEditor({
+       .map((id) => ({ id, title: `${id} (saved session)` })),
+   ];
+   const change = (mutation: InitiativeChange) =>
+-    new Promise<void>((resolve, reject) =>
++    new Promise<void>((resolve, reject) => {
++      if (closed.current) {
++        reject(new Error("Initiative editor was closed"));
++        return;
++      }
+       update(
+         { initiativeChange: mutation },
+         { onSaved: resolve, onFailed: () => reject(new Error("Initiative was not saved")) },
+-      ),
+-    );
++      );
++    });
+   const save = async () => {
+     if (!name.trim() || busy) return;
+     setBusy(true);
+@@ -98,16 +107,16 @@ function GroupEditor({
+           id: target.id,
+           threadId: coordinator === "" ? null : (coordinator as ThreadId),
+         });
+-      onClose();
++      if (!closed.current) onClose();
+     } catch {
+-      setBusy(false);
++      if (!closed.current) setBusy(false);
+     }
+   };
+   return (
+     <Dialog
+       open
+       onOpenChange={(open) => {
+-        if (!open && !busy) onClose();
++        if (!open) dismiss();
+       }}
+     >
+       <DialogPopup>
+@@ -117,7 +126,7 @@ function GroupEditor({
+           </DialogTitle>
+           <DialogDescription>
+             Group related work across repositories. Moving a session changes its display group;
+-            sessions keep their current state.
++            sessions keep their current state. Closing keeps changes already saved.
+           </DialogDescription>
+         </DialogHeader>
+         <DialogPanel>
+@@ -163,7 +172,7 @@ function GroupEditor({
+           </fieldset>
+         </DialogPanel>
+         <DialogFooter>
+-          <Button variant="outline" disabled={busy} onClick={onClose}>
++          <Button variant="outline" onClick={dismiss}>
+             Cancel
+           </Button>
+           <Button disabled={busy || !name.trim()} onClick={() => void save()}>
+diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
+index 949e410b..aa9af60d 100644
+--- a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
++++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
+@@ -17,6 +17,8 @@ import {
+   PROJECT_ID,
+   installFakeEnvironment,
+   threadWithHistory,
++  serverSettingsWrites,
++  savedServerSettings,
+   type FakeDriver,
+ } from "../../test/fakeEnvironment";
+ import { act, render } from "../../test/render";
+@@ -86,6 +88,7 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+   });
+   using _environment = installFakeEnvironment([a, flat, b, hidden, foreign], {
+     initiativeGroups: true,
++    acceptSettingsUpdates: true,
+     projects: [
+       project(PROJECT_ID, "local-repository"),
+       project(foreign.projectId, "foreign-repository"),
+@@ -130,4 +133,16 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+   await userEvent.click(page.getByRole("option", { name: "local-repository", exact: true }));
+   await expect.element(row(a.title)).toBeVisible();
+   await expect.element(row(foreign.title)).not.toBeInTheDocument();
++  await page.getByRole("button", { name: "New initiative", exact: true }).click();
++  await page.getByRole("textbox", { name: "Name" }).fill("PM only initiative");
++  await page.getByRole("combobox", { name: "Project manager", exact: true }).selectOptions(a.id);
++  await page.getByRole("button", { name: "Save", exact: true }).click();
++  await vi.waitFor(() => expect(serverSettingsWrites().length).toBeGreaterThan(0));
++  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
++  const saved = Object.values(savedServerSettings().initiatives).find(
++    (group) => group.name === "PM only initiative",
++  );
++  expect(saved).toMatchObject({ coordinatorThreadId: a.id, memberThreadIds: [a.id] });
++  await expect.element(page.getByRole("button", { name: /^PM only initiative/ })).toBeVisible();
++  await expect.element(row(a.title)).toBeVisible();
+ });
+diff --git a/apps/web/src/hooks/useSettings.ts b/apps/web/src/hooks/useSettings.ts
+index 2310a7d2..5472018c 100644
+--- a/apps/web/src/hooks/useSettings.ts
++++ b/apps/web/src/hooks/useSettings.ts
+@@ -9,7 +9,7 @@ import {
+   type ProviderInstanceMutation,
+   type ProviderInstanceId,
+   ServerSettings,
+-  type ServerSettingsPatch,
++  ServerSettingsPatch,
+   sessionGrantsScope,
+ } from "@t3tools/contracts";
+ import {
+@@ -240,7 +240,7 @@ export async function persistClientSettingsUpdate(
+   });
+ }
+ 
+-const SERVER_SETTINGS_KEYS = new Set<string>(Struct.keys(ServerSettings.fields));
++const SERVER_SETTINGS_KEYS = new Set<string>(Struct.keys(ServerSettingsPatch.fields));
+ 
+ function splitPatch(patch: UnifiedSettingsPatch): {
+   serverPatch: ServerSettingsPatch;
+diff --git a/apps/web/test/fakeEnvironment.ts b/apps/web/test/fakeEnvironment.ts
+index 881832db..a70755d0 100644
+--- a/apps/web/test/fakeEnvironment.ts
++++ b/apps/web/test/fakeEnvironment.ts
+@@ -28,7 +28,10 @@ import {
+   type OrchestrationV2ThreadStreamItem,
+   type OrchestrationV2TurnItem,
+   type TerminalMetadataStreamEvent,
++  type ServerConfigStreamEvent,
++  type ServerSettingsPatch,
+ } from "@t3tools/contracts";
++import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
+ import type {
+   ConnectionAttemptError,
+   ConnectionCatalogEntry,
+@@ -335,6 +338,9 @@ let projects: ReadonlyArray<OrchestrationProjectShell> = [project];
+ let configOverrides: Partial<ServerConfig> = {};
+ let dispatched: OrchestrationV2Command[] = [];
+ let acceptCommands = false;
++let acceptSettingsUpdates = false;
++let settingsWrites: ServerSettingsPatch[] = [];
++const configSubscribers = new Set<Queue.Queue<ServerConfigStreamEvent>>();
+ let sequence = 1;
+ let vcsStatusSubscriber: Queue.Queue<VcsStatusStreamEvent> | null = null;
+ 
+@@ -352,6 +358,17 @@ const subscribe = <A>(first: ReadonlyArray<A>, register?: (queue: Queue.Queue<A>
+   );
+ 
+ const handlers: Record<string, (input: never) => unknown> = {
++  [WS_METHODS.serverUpdateSettings]: ({ patch }: { readonly patch: ServerSettingsPatch }) =>
++    Effect.gen(function* () {
++      if (!acceptSettingsUpdates) return yield* Effect.never;
++      settingsWrites.push(patch);
++      const settings = applyServerSettingsPatch(serverConfig().settings, patch);
++      configOverrides = { ...configOverrides, settings };
++      yield* Effect.forEach(configSubscribers, (queue) =>
++        Queue.offer(queue, { version: 1, type: "snapshot", config: serverConfig() }),
++      );
++      return settings;
++    }),
+   // Recorded, and accepted only when the scenario asks, since a pending command holds every
+   // later command on its thread. Accepted commands' events never arrive.
+   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command: OrchestrationV2Command) =>
+@@ -415,10 +432,20 @@ const handlers: Record<string, (input: never) => unknown> = {
+         if (vcsStatusSubscriber === queue) vcsStatusSubscriber = null;
+       };
+     }),
+-  [WS_METHODS.subscribeServerConfig]: () =>
+-    subscribe([{ version: 1 as const, type: "snapshot" as const, config: serverConfig() }]),
++  [WS_METHODS.subscribeServerConfig]: () => subscribeConfig(),
+ };
+ 
++const subscribeConfig = () =>
++  subscribe<ServerConfigStreamEvent>(
++    [{ version: 1, type: "snapshot", config: serverConfig() }],
++    (queue) => {
++      configSubscribers.add(queue);
++      return () => {
++        configSubscribers.delete(queue);
++      };
++    },
++  );
++
+ // Unanswered calls stay pending, like a server that has not replied yet.
+ const client = new Proxy(handlers, {
+   get: (target, method: string) =>
+@@ -432,8 +459,7 @@ const client = new Proxy(handlers, {
+ const session: EnvironmentConnectionLease["session"] = {
+   client: client as unknown as WsRpcProtocolClient,
+   initialConfig: Effect.sync(serverConfig),
+-  subscribeServerConfig: () =>
+-    subscribe([{ version: 1 as const, type: "snapshot" as const, config: serverConfig() }]),
++  subscribeServerConfig: () => subscribeConfig(),
+   ready: Effect.void,
+   probe: Effect.void,
+   inboundFrames: Effect.succeed(0),
+@@ -471,6 +497,7 @@ export function installFakeEnvironment(
+   fixtures: ReadonlyArray<FakeThread>,
+   options?: {
+     readonly acceptCommands?: boolean;
++    readonly acceptSettingsUpdates?: boolean;
+     readonly settings?: Partial<ServerConfig["settings"]>;
+     readonly initiativeGroups?: boolean;
+     readonly projects?: ReadonlyArray<OrchestrationProjectShell>;
+@@ -488,6 +515,8 @@ export function installFakeEnvironment(
+   };
+   dispatched = [];
+   acceptCommands = options?.acceptCommands === true;
++  acceptSettingsUpdates = options?.acceptSettingsUpdates === true;
++  settingsWrites = [];
+   globalThis.fetch = async (input, init) => {
+     const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+     if (url.origin !== window.location.origin) return realFetch(input, init);
+@@ -513,6 +542,8 @@ export function installFakeEnvironment(
+       configOverrides = {};
+       dispatched = [];
+       acceptCommands = false;
++      acceptSettingsUpdates = false;
++      settingsWrites = [];
+     },
+   };
+ }
+@@ -522,6 +553,14 @@ export function dispatchedCommands(): ReadonlyArray<OrchestrationV2Command> {
+   return dispatched;
+ }
+ 
++export function serverSettingsWrites(): ReadonlyArray<ServerSettingsPatch> {
++  return settingsWrites;
++}
++
++export function savedServerSettings(): ServerConfig["settings"] {
++  return serverConfig().settings;
++}
++
+ type ThreadEvent = Extract<OrchestrationV2ThreadStreamItem, { readonly kind: "event" }>["event"];
+ 
+ export async function emitTerminalMetadata(event: TerminalMetadataStreamEvent): Promise<void> {
+diff --git a/scripts/scenarios/initiative-save.e2e.ts b/scripts/scenarios/initiative-save.e2e.ts
+new file mode 100644
+index 00000000..cc71f9fc
+--- /dev/null
++++ b/scripts/scenarios/initiative-save.e2e.ts
+@@ -0,0 +1,24 @@
++import { expect } from "e2e";
++
++import { test, WEB } from "./t3.ts";
++
++test(
++  "Saving a PM-only initiative reaches the server and closes the editor",
++  WEB,
++  async ({ t3, app, screen }) => {
++    const project = await t3.project("initiative-demo");
++    await t3.thread({ project, title: "Scenario PM", messages: ["first"] });
++    await t3.open();
++
++    await screen.getByRole("button", "New initiative").tap();
++    await screen.getByLabel("Name").fill("Saved initiative");
++    await screen.getByLabel("Project manager").selectOption({ label: "Scenario PM" });
++    await app.screenshot("initiative-before-save");
++    await screen.getByRole("button", "Save").tap();
++
++    await expect(screen.getByRole("heading", "New initiative")).toBeHidden();
++    await expect(screen.getByText("Saved initiative", { exact: true })).toBeVisible();
++    await expect(screen.getByText("Project manager", { exact: true })).toBeVisible();
++    await app.screenshot("initiative-saved");
++  },
++);
