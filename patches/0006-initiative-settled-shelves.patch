@@ -1,0 +1,556 @@
+diff --git a/apps/web/src/components/InitiativeSidebar.browser.test.tsx b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
+index ea36a795c6..a30fd5f690 100644
+--- a/apps/web/src/components/InitiativeSidebar.browser.test.tsx
++++ b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
+@@ -100,6 +100,7 @@ const view = () => (
+           ]),
+           null,
+           [],
++          JSON.parse(localStorage.getItem("t3code:initiatives:expanded-settled") ?? "[]"),
+         ).groups
+       }
+       renderThread={(thread) => <li>{thread.title}</li>}
+@@ -119,11 +120,17 @@ function setup() {
+   };
+   localStorage.clear();
+ }
+-it("keeps settled members with the PM, mounts saved rows, and persists collapse", async () => {
++it("shelves settled members, mounts saved rows, and persists both collapse controls", async () => {
+   setup();
+   await using screen = await render(view());
+   await expect.element(screen.getByText("Routing PM")).toBeInTheDocument();
++  await expect.element(screen.getByText("Routing API")).not.toBeInTheDocument();
++  await screen.getByRole("button", { name: "Settled in Routing" }).click();
++  await screen.rerender(view());
+   await expect.element(screen.getByText("Routing API")).toBeInTheDocument();
++  expect(JSON.parse(localStorage.getItem("t3code:initiatives:expanded-settled")!)).toEqual([
++    "initiative:local:routing:settled",
++  ]);
+   expect(state.mount.mock.calls.map((call) => call[2])).toEqual([pm, api]);
+   await screen.getByRole("button", { name: /^Routing/ }).click();
+   await expect.element(screen.getByText("Routing PM")).not.toBeInTheDocument();
+@@ -147,6 +154,9 @@ it("creates a named group with an explicit PM and settled worker without lifecyc
+   expect(group.name).toBe("Routing");
+   expect(group.coordinatorThreadId).toBe(pm);
+   expect(new Set(group.memberThreadIds)).toEqual(new Set([pm, api]));
++  await expect.element(screen.getByText("Routing API")).not.toBeInTheDocument();
++  await screen.getByRole("button", { name: "Settled in Routing" }).click();
++  await screen.rerender(view());
+   await expect.element(screen.getByText("Routing API")).toBeInTheDocument();
+   expect(threads[1]?.settledOverride).toBe("settled");
+   expect(state.changes.map((change) => change.action)).toEqual([
+diff --git a/apps/web/src/components/InitiativeSidebar.logic.test.ts b/apps/web/src/components/InitiativeSidebar.logic.test.ts
+index 9c8033494f..14a6e3345b 100644
+--- a/apps/web/src/components/InitiativeSidebar.logic.test.ts
++++ b/apps/web/src/components/InitiativeSidebar.logic.test.ts
+@@ -26,11 +26,11 @@ it("keeps the coordinator first and accounts for every member including unloaded
+   ).toEqual([
+     ["attention", 1],
+     ["working", 1],
+-    ["ready", 1],
++    ["settled", 1],
+     ["unloaded", 1],
+   ]);
+   expect(initiativeSummary(group, threads)).toBe(
+-    "1 needs you · 1 working · 1 idle or done · 1 not loaded",
++    "1 needs you · 1 working · 1 settled · 1 not loaded",
+   );
+ });
+ 
+@@ -42,6 +42,7 @@ it("uses grouped order and scope for ranges while excluding collapsed and unrela
+       environmentId,
+       id: id(name),
+       projectId: ProjectId.make(projectId),
++      settledOverride: name === "b" ? "settled" : null,
+     }) as EnvironmentThreadShell;
+   const a = shell("a", "api");
+   const unrelated = shell("unrelated", "api");
+@@ -64,11 +65,48 @@ it("uses grouped order and scope for ranges while excluding collapsed and unrela
+   const layout = initiativeLayout([a, unrelated, b, hidden], configs, null, [
+     "initiative:local:other",
+   ]);
+-  expect(layout.visibleThreads.map((thread) => thread.id)).toEqual([a.id, b.id]);
++  expect(layout.visibleThreads.map((thread) => thread.id)).toEqual([a.id]);
++  expect(layout.groups[0]?.settledThreadIds).toEqual([b.id]);
++  expect(layout.keys.has("local:b")).toBe(true);
++  expect(layout.memberThreads.map((thread) => thread.id)).toEqual([a.id, b.id, hidden.id]);
++  const expanded = initiativeLayout(
++    [a, unrelated, b, hidden],
++    configs,
++    null,
++    [],
++    ["initiative:local:routing:settled"],
++  );
++  expect(expanded.visibleThreads.map((thread) => thread.id)).toEqual([a.id, b.id, hidden.id]);
++  const reopened = initiativeLayout(
++    [a, unrelated, { ...b, settledOverride: "active" }, hidden],
++    configs,
++    null,
++    [],
++  );
++  expect(reopened.visibleThreads.map((thread) => thread.id)).toEqual([a.id, b.id, hidden.id]);
++  expect(reopened.groups[0]?.settledThreadIds).toEqual([]);
++  const routeVisible = initiativeLayout([a, b], configs, null, [], [], "local:b");
++  expect(routeVisible.visibleThreads.map((thread) => thread.id)).toEqual([a.id, b.id]);
++  const settledPm = initiativeLayout([{ ...a, settledOverride: "settled" }, b], configs, null, []);
++  expect(settledPm.visibleThreads).toEqual([]);
++  expect(settledPm.groups[0]?.settledThreadIds).toEqual([a.id, b.id]);
++  const closed = initiativeLayout(
++    [a, b],
++    configs,
++    null,
++    ["initiative:local:routing"],
++    ["initiative:local:routing:settled"],
++  );
++  expect(closed.visibleThreads).toEqual([]);
++  expect(configs.get(environmentId)?.settings.initiatives.routing.memberThreadIds).toEqual([
++    a.id,
++    b.id,
++  ]);
+   expect(layout.keys.has("local:unrelated")).toBe(false);
+   expect(layout.keys.has("local:hidden")).toBe(true);
+   const scoped = initiativeLayout([a, unrelated, b, hidden], configs, new Set(["local:ui"]), []);
+-  expect(scoped.visibleThreads.map((thread) => thread.id)).toEqual([b.id]);
++  expect(scoped.visibleThreads.map((thread) => thread.id)).toEqual([]);
++  expect(scoped.groups[0]?.settledThreadIds).toEqual([b.id]);
+   expect(scoped.groups[0]?.displayed.coordinatorThreadId).toBeNull();
+   expect(scoped.groups[1]?.hidden).toBe(true);
+ });
+diff --git a/apps/web/src/components/InitiativeSidebar.logic.ts b/apps/web/src/components/InitiativeSidebar.logic.ts
+index 1ddc9811b8..a7949e0ce1 100644
+--- a/apps/web/src/components/InitiativeSidebar.logic.ts
++++ b/apps/web/src/components/InitiativeSidebar.logic.ts
+@@ -15,13 +15,25 @@ export function initiativeStatusCounts(
+   group: Initiative,
+   threads: ReadonlyMap<string, EnvironmentThreadShell>,
+ ) {
+-  const counts = { working: 0, attention: 0, failed: 0, waiting: 0, ready: 0, unloaded: 0 };
++  const counts = {
++    working: 0,
++    attention: 0,
++    failed: 0,
++    waiting: 0,
++    ready: 0,
++    settled: 0,
++    unloaded: 0,
++  };
+   for (const id of initiativeMembers(group)) {
+     const thread = threads.get(id);
+     if (!thread) {
+       counts.unloaded++;
+       continue;
+     }
++    if (thread.settledOverride === "settled") {
++      counts.settled++;
++      continue;
++    }
+     const status = resolveSidebarThreadStatus(thread);
+     if (status === "approval" || status === "input" || status === "request") counts.attention++;
+     else if (status === "working" || status === "preparing") counts.working++;
+@@ -35,7 +47,8 @@ export function initiativeStatusCounts(
+       { status: "failed", label: "failed" },
+       { status: "working", label: "working" },
+       { status: "waiting", label: "waiting" },
+-      { status: "ready", label: "idle or done" },
++      { status: "ready", label: "idle" },
++      { status: "settled", label: "settled" },
+       { status: "unloaded", label: "not loaded" },
+     ] as const
+   )
+@@ -59,6 +72,8 @@ export interface InitiativeSidebarGroup {
+   id: string;
+   group: Initiative;
+   displayed: Initiative;
++  settledThreadIds: readonly ThreadId[];
++  visibleSettledThreadIds: readonly ThreadId[];
+   hidden: boolean;
+ }
+ 
+@@ -71,6 +86,8 @@ export function initiativeLayout(
+   >,
+   scopedProjectKeys: ReadonlySet<string> | null,
+   collapsed: readonly string[],
++  expandedSettled: readonly string[] = [],
++  routeThreadKey: string | null = null,
+ ) {
+   const byKey = new Map(threads.map((thread) => [`${thread.environmentId}:${thread.id}`, thread]));
+   const keys = new Set<string>();
+@@ -98,14 +115,35 @@ export function initiativeLayout(
+         memberThreadIds: ids,
+       };
+       const hidden = scopedProjectKeys !== null && ids.length === 0;
+-      groups.push({ environmentId, id, group, displayed, hidden });
++      const key = `initiative:${environmentId}:${id}`;
++      const settledThreadIds = ids.filter(
++        (threadId) => byKey.get(`${environmentId}:${threadId}`)?.settledOverride === "settled",
++      );
++      const visibleSettledThreadIds = expandedSettled.includes(`${key}:settled`)
++        ? settledThreadIds
++        : settledThreadIds.filter((threadId) => `${environmentId}:${threadId}` === routeThreadKey);
++      groups.push({
++        environmentId,
++        id,
++        group,
++        displayed,
++        settledThreadIds,
++        visibleSettledThreadIds,
++        hidden,
++      });
+       for (const threadId of ids) {
+         const thread = byKey.get(`${environmentId}:${threadId}`);
+         if (thread === undefined) continue;
+         memberThreads.push(thread);
+-        if (!hidden && !collapsed.includes(`initiative:${environmentId}:${id}`))
++        if (!hidden && !collapsed.includes(key) && !settledThreadIds.includes(threadId))
+           visibleThreads.push(thread);
+       }
++      if (!hidden && !collapsed.includes(key)) {
++        for (const threadId of visibleSettledThreadIds) {
++          const thread = byKey.get(`${environmentId}:${threadId}`);
++          if (thread !== undefined) visibleThreads.push(thread);
++        }
++      }
+     }
+   }
+   return { groups, keys, visibleThreads, memberThreads };
+diff --git a/apps/web/src/components/InitiativeSidebar.tsx b/apps/web/src/components/InitiativeSidebar.tsx
+index 4f0c892418..89f476d56e 100644
+--- a/apps/web/src/components/InitiativeSidebar.tsx
++++ b/apps/web/src/components/InitiativeSidebar.tsx
+@@ -15,6 +15,7 @@ import { threadFamilies } from "../state/threads";
+ import { useUpdateEnvironmentSettings } from "../hooks/useSettings";
+ import { useLocalStorage } from "../hooks/useLocalStorage";
+ import { Button } from "./ui/button";
++import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
+ import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
+ import { Input } from "./ui/input";
+ import {
+@@ -41,6 +42,7 @@ const statusColors = {
+   working: "text-info-foreground",
+   waiting: "text-warning-foreground",
+   ready: "text-sidebar-muted-foreground",
++  settled: "text-sidebar-muted-foreground",
+   unloaded: "text-sidebar-muted-foreground",
+ };
+ 
+@@ -218,13 +220,27 @@ function InitiativeGroup({
+     collapsedSchema,
+   );
+   const key = `initiative:${target.environmentId}:${target.id}`;
++  const settledKey = `${key}:settled`;
++  const [expandedSettled, setExpandedSettled] = useLocalStorage(
++    "t3code:initiatives:expanded-settled",
++    [] as readonly string[],
++    collapsedSchema,
++  );
++  const settledExpanded = expandedSettled.includes(settledKey);
+   const closed = collapsed.includes(key);
+   const byId = new Map(
+     threads
+       .filter((thread) => thread.environmentId === target.environmentId)
+       .map((thread) => [thread.id, thread]),
+   );
+-  const ids = initiativeMembers(target.displayed);
++  const ids = initiativeMembers(target.displayed).filter(
++    (id) => !target.settledThreadIds.includes(id),
++  );
++  const coordinatorId =
++    target.displayed.coordinatorThreadId !== null &&
++    ids.includes(target.displayed.coordinatorThreadId)
++      ? target.displayed.coordinatorThreadId
++      : null;
+   const membersKey = JSON.stringify(initiativeMembers(target.group));
+   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- retains explicitly grouped saved sessions in the shared shell registry, including while collapsed
+   useEffect(() => {
+@@ -244,7 +260,7 @@ function InitiativeGroup({
+       data-initiative={target.id}
+     >
+       <div
+-        className={`flex items-center gap-1 bg-sidebar-control-surface px-3 py-1 ${closed ? "rounded-lg" : "rounded-t-lg"}`}
++        className={`flex items-start gap-1 bg-sidebar-control-surface px-3 py-2 ${closed ? "rounded-lg" : "rounded-t-lg"}`}
+       >
+         <Tooltip>
+           <TooltipTrigger
+@@ -263,24 +279,24 @@ function InitiativeGroup({
+               />
+             }
+           >
+-            <span className="grid min-w-0 grid-cols-[auto_minmax(3rem,1fr)_minmax(0,auto)] items-center gap-2 text-sm font-medium">
++            <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
+               <ChevronDownIcon
+                 className={closed ? "size-3 shrink-0 -rotate-90" : "size-3 shrink-0"}
+               />
+               <span className="min-w-0 truncate">{target.group.name}</span>
+-              <span
+-                aria-hidden
+-                className="flex min-w-0 items-center gap-1.5 overflow-x-auto text-xs tabular-nums [scrollbar-width:none]"
+-              >
+-                {statusCounts.map(({ status, count }) => (
+-                  <span
+-                    key={status}
+-                    className={`shrink-0 whitespace-nowrap ${statusColors[status]}`}
+-                  >
+-                    {count}
+-                  </span>
+-                ))}
+-              </span>
++            </span>
++            <span
++              aria-hidden
++              className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 pl-5 text-xs font-normal tabular-nums"
++            >
++              {statusCounts.map(({ status, count, label }) => (
++                <span key={status} className={`shrink-0 whitespace-nowrap ${statusColors[status]}`}>
++                  {count} {label}
++                </span>
++              ))}
++              {statusCounts.length === 0 && (
++                <span className="text-sidebar-muted-foreground">No sessions</span>
++              )}
+             </span>
+           </TooltipTrigger>
+           <TooltipPopup>
+@@ -319,19 +335,15 @@ function InitiativeGroup({
+                 {thread ? (
+                   renderThread(
+                     thread,
+-                    target.displayed.coordinatorThreadId !== null &&
+-                      id !== target.displayed.coordinatorThreadId
+-                      ? scopedThreadKey(
+-                          scopeThreadRef(
+-                            target.environmentId,
+-                            target.displayed.coordinatorThreadId,
+-                          ),
+-                        )
++                    coordinatorId !== null && id !== coordinatorId
++                      ? scopedThreadKey(scopeThreadRef(target.environmentId, coordinatorId))
+                       : key,
+-                    {
+-                      coordinator: id === target.displayed.coordinatorThreadId,
+-                      hasChildren: id === target.displayed.coordinatorThreadId && ids.length > 1,
+-                    },
++                    coordinatorId === null
++                      ? undefined
++                      : {
++                          coordinator: id === coordinatorId,
++                          hasChildren: id === coordinatorId && ids.length > 1,
++                        },
+                   )
+                 ) : (
+                   <li>
+@@ -343,7 +355,37 @@ function InitiativeGroup({
+               </Fragment>
+             );
+           })}
+-          {ids.length === 0 && (
++          {target.settledThreadIds.length > 0 && (
++            <li className="mx-0.5 list-none" data-thread-selection-safe>
++              <CollapsibleSectionHeader
++                data-sidebar-row={settledKey}
++                data-sidebar-parent={key}
++                aria-label={`Settled in ${target.group.name}`}
++                expanded={settledExpanded}
++                onClick={() =>
++                  setExpandedSettled((current) =>
++                    settledExpanded
++                      ? current.filter((item) => item !== settledKey)
++                      : [...current, settledKey],
++                  )
++                }
++                accessory={
++                  <span className="font-normal tabular-nums">{target.settledThreadIds.length}</span>
++                }
++              >
++                Settled
++              </CollapsibleSectionHeader>
++              <ul>
++                {target.visibleSettledThreadIds.map((id) => {
++                  const thread = byId.get(id);
++                  return thread ? (
++                    <Fragment key={id}>{renderThread(thread, settledKey)}</Fragment>
++                  ) : null;
++                })}
++              </ul>
++            </li>
++          )}
++          {ids.length === 0 && target.settledThreadIds.length === 0 && (
+             <li className="px-3 py-2 text-xs text-sidebar-muted-foreground">
+               Add a project manager and execution sessions.
+             </li>
+diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
+index 5b48a613a0..d29003054b 100644
+--- a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
++++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
+@@ -71,7 +71,8 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+   settings();
+   const a = threadWithHistory("group-a", 1);
+   const flat = threadWithHistory("flat-between", 1);
+-  const b = { ...threadWithHistory("group-b", 1), settled: true as const };
++  const b = threadWithHistory("group-b", 1);
++  const settled = { ...threadWithHistory("settled-worker", 1), settled: true as const };
+   const hidden = threadWithHistory("collapsed-worker", 1);
+   const foreign = {
+     ...threadWithHistory("foreign-worker", 1),
+@@ -87,7 +88,7 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+     createdAt: "2026-03-17T19:12:28.000Z",
+     updatedAt: "2026-03-17T19:12:28.000Z",
+   });
+-  using _environment = installFakeEnvironment([a, flat, b, hidden, foreign], {
++  using _environment = installFakeEnvironment([a, flat, b, hidden, foreign, settled], {
+     initiativeGroups: true,
+     acceptSettingsUpdates: true,
+     projects: [
+@@ -99,7 +100,7 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+         routing: {
+           name: "Routing",
+           coordinatorThreadId: a.id,
+-          memberThreadIds: [a.id, b.id, foreign.id],
++          memberThreadIds: [a.id, b.id, foreign.id, settled.id],
+         },
+         other: {
+           name: "Other work",
+@@ -116,6 +117,11 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+   await expect.element(page.getByTestId("sidebar-ungrouped-threads")).toBeVisible();
+   await expect.element(row(flat.title)).toHaveAttribute("data-testid", "sidebar-row-slim");
+   await expect.element(row(b.title)).toBeVisible();
++  await expect.element(row(settled.title)).not.toBeInTheDocument();
++  await page.getByRole("button", { name: "Settled in Routing", exact: true }).click();
++  await expect.element(row(settled.title)).toBeVisible();
++  await page.getByRole("button", { name: "Settled in Routing", exact: true }).click();
++  await expect.element(row(settled.title)).not.toBeInTheDocument();
+   await expect
+     .element(page.getByTestId("sidebar-settled-shelf-toggle"))
+     .toHaveTextContent("Settled0");
+@@ -128,7 +134,11 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+   await act(() => useThreadSelectionStore.getState().clearSelection());
+   await controlClick(a.title);
+   await shiftClick(flat.title);
+-  expect(selected()).toEqual([key(a.id), key(b.id), key(foreign.id), key(flat.id)]);
++  expect(selected()).toEqual([key(a.id), key(flat.id)]);
++  await act(() => useThreadSelectionStore.getState().clearSelection());
++  await controlClick(flat.title);
++  await shiftClick(foreign.title);
++  expect(selected()).toEqual([key(flat.id), key(a.id), key(b.id), key(foreign.id)]);
+   await expect.element(row(foreign.title)).toBeVisible();
+   await userEvent.click(
+     page.getByRole("combobox", { name: "Filter threads by project", exact: true }),
+diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
+index 94af06d445..52fa711259 100644
+--- a/apps/web/src/components/Sidebar.tsx
++++ b/apps/web/src/components/Sidebar.tsx
+@@ -487,11 +487,18 @@ function useSidebarThreads(input: {
+     [] as readonly string[],
+     INITIATIVE_COLLAPSED_SCHEMA,
+   );
++  const [expandedInitiativeSettled] = useLocalStorage(
++    "t3code:initiatives:expanded-settled",
++    [] as readonly string[],
++    INITIATIVE_COLLAPSED_SCHEMA,
++  );
+   const initiatives = initiativeLayout(
+     threads,
+     serverConfigs,
+     scopedProjectKeys,
+     collapsedInitiatives,
++    expandedInitiativeSettled,
++    routeRowThreadKey,
+   );
+   const partition = partitionSidebarThreads({
+     threads: threads.filter((thread) => !initiatives.keys.has(threadShellKey(thread))),
+@@ -561,7 +568,6 @@ function useSidebarThreads(input: {
+           };
+         });
+   const orderedThreads = [
+-    ...initiatives.visibleThreads,
+     ...pinnedThreads,
+     ...(projectFolders === null
+       ? activeThreads
+@@ -569,6 +575,7 @@ function useSidebarThreads(input: {
+     ...visibleWorkingThreads,
+     ...visibleSnoozedThreads,
+     ...renderedSettledThreads,
++    ...initiatives.visibleThreads,
+   ];
+   const sectionByThreadKey = new Map<string, SidebarSection>();
+   for (const [list, section] of [
+@@ -627,7 +634,12 @@ function useSidebarThreads(input: {
+     visibleWorkingThreads,
+     orderedThreadKeys: orderedThreads.map(threadShellKey),
+     threadByKey: new Map(orderedThreads.map((thread) => [threadShellKey(thread), thread] as const)),
+-    settledThreadKeys: new Set(settledThreads.map(threadShellKey)),
++    settledThreadKeys: new Set(
++      [
++        ...settledThreads,
++        ...initiatives.memberThreads.filter((thread) => thread.settledOverride === "settled"),
++      ].map(threadShellKey),
++    ),
+     snoozedThreadKeys: new Set(snoozedThreads.map(threadShellKey)),
+     sectionByThreadKey,
+     pinnedKeys: pinnedThreads.map(threadShellKey),
+@@ -3694,7 +3706,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                         ) : null,
+                       );
+                       if (showOtherSessions) {
+-                        items.push(
++                        items.unshift(
+                           <li
+                             key="other-sessions"
+                             data-testid="sidebar-ungrouped-threads"
+@@ -3706,7 +3718,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                           </li>,
+                         );
+                       } else if (!hasVisibleInitiatives || from !== null) {
+-                        items.push(...looseItems);
++                        items.unshift(...looseItems);
+                       }
+                       return items;
+                     })()}
+diff --git a/scripts/scenarios/initiative-settled.e2e.ts b/scripts/scenarios/initiative-settled.e2e.ts
+new file mode 100644
+index 0000000000..885aded7a1
+--- /dev/null
++++ b/scripts/scenarios/initiative-settled.e2e.ts
+@@ -0,0 +1,43 @@
++import { expect } from "e2e";
++
++import { test, WEB } from "./t3.ts";
++
++test(
++  "Settled initiative sessions return to their active list when reopened",
++  WEB,
++  async ({ t3, app, screen }) => {
++    const project = await t3.project("initiative-shelves");
++    await t3.thread({ project, title: "Shelf PM", messages: ["first"] });
++    await t3.thread({ project, title: "Shelf worker", messages: ["first"] });
++    await t3.thread({ project, title: "Outside session", messages: ["first"] });
++    await t3.open();
++    await screen.getByRole("button", "New initiative").tap();
++    await screen.getByLabel("Name").fill("Initiative session management");
++    await screen.getByLabel("Project manager").selectOption({ label: "Shelf PM" });
++    await screen.getByLabel("Shelf worker").check();
++    await screen.getByRole("button", "Save").tap();
++    await expect(screen.getByRole("heading", "New initiative")).toBeHidden();
++    await app.screenshot("initiative-active");
++
++    const worker = screen.getByRole("button", { name: /Shelf worker,/ });
++    await worker.secondaryTap();
++    await screen.getByRole("menuitem", "Settle thread", { exact: true }).tap();
++    await app.screenshot("initiative-settled");
++    const shelf = screen.getByRole("button", "Settled in Initiative session management", {
++      exact: true,
++    });
++    await expect(shelf).toBeVisible();
++    await expect(worker).toBeHidden();
++    await shelf.tap();
++    await expect(worker).toBeVisible();
++    await app.screenshot("initiative-settled-expanded");
++    await worker.secondaryTap();
++    await screen.getByRole("menuitem", "Un-settle thread", { exact: true }).tap();
++    await expect(shelf).toBeHidden();
++    await expect(worker).toBeVisible();
++    await app.open("/");
++    await expect(worker).toBeVisible();
++    await expect(shelf).toBeHidden();
++    await app.screenshot("initiative-reopened");
++  },
++);
