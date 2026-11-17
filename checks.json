@@ -51,6 +51,7 @@
         "run",
         "scenarios/initiative-save.e2e.ts",
         "scenarios/initiative-settled.e2e.ts",
+        "scenarios/kp-experience.e2e.ts",
         "--target",
         "web"
       ]
@@ -110,7 +111,8 @@
     "apps/server/dist/client/": [
       "New initiative",
       "Project manager",
-      "Threads outside initiatives"
+      "Threads outside initiatives",
+      "Enable the KP Experience"
     ],
     "apps/server/dist/": [
       "t3_initiative_list",

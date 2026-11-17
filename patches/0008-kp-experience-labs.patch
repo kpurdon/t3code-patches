@@ -1,0 +1,670 @@
+diff --git a/apps/web/src/components/InitiativeSidebar.browser.test.tsx b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
+index d2ded2d729..2a6849ece5 100644
+--- a/apps/web/src/components/InitiativeSidebar.browser.test.tsx
++++ b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
+@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
+   initiatives: {} as Initiatives,
+   changes: [] as InitiativeChange[],
+   supported: true,
++  enabled: true,
+   holdSaves: false,
+   failNextSave: false,
+   pendingSaves: [] as Array<{ onSaved?: () => void; onFailed?: () => void }>,
+@@ -32,7 +33,8 @@ vi.mock(import("../state/environments"), () => ({
+         label: "Local",
+         serverConfig: {
+           initiativeGroups: state.supported,
+-          settings: { initiatives: state.initiatives },
++          kpExperienceSettings: true,
++          settings: { initiatives: state.initiatives, kpExperienceEnabled: state.enabled },
+         },
+       },
+     ],
+@@ -73,7 +75,7 @@ const threads = [
+ ].map((thread) => ({ ...thread, environmentId, archivedAt: null })) as EnvironmentThreadShell[];
+ const view = () => (
+   <ul>
+-    {state.supported && (
++    {state.supported && state.enabled && (
+       <li>
+         <button
+           onClick={() =>
+@@ -98,7 +100,11 @@ const view = () => (
+           new Map([
+             [
+               environmentId,
+-              { initiativeGroups: state.supported, settings: { initiatives: state.initiatives } },
++              {
++                initiativeGroups: state.supported,
++                kpExperienceSettings: true,
++                settings: { initiatives: state.initiatives, kpExperienceEnabled: state.enabled },
++              },
+             ],
+           ]),
+           null,
+@@ -113,6 +119,7 @@ const view = () => (
+ );
+ function setup() {
+   state.supported = true;
++  state.enabled = true;
+   state.changes = [];
+   state.holdSaves = false;
+   state.failNextSave = false;
+@@ -169,9 +176,10 @@ it("creates a named group with an explicit PM and settled worker without lifecyc
+     "coordinator",
+   ]);
+ });
+-it("does not expose grouping controls for an unpatched environment", async () => {
++it.each(["unsupported", "disabled"])("hides grouping controls when %s", async (reason) => {
+   setup();
+-  state.supported = false;
++  if (reason === "unsupported") state.supported = false;
++  else state.enabled = false;
+   await using screen = await render(view());
+   await expect
+     .element(screen.getByRole("button", { name: "New initiative" }))
+diff --git a/apps/web/src/components/InitiativeSidebar.logic.test.ts b/apps/web/src/components/InitiativeSidebar.logic.test.ts
+index 14a6e3345b..54af32ebdf 100644
+--- a/apps/web/src/components/InitiativeSidebar.logic.test.ts
++++ b/apps/web/src/components/InitiativeSidebar.logic.test.ts
+@@ -53,7 +53,9 @@ it("uses grouped order and scope for ranges while excluding collapsed and unrela
+       environmentId,
+       {
+         initiativeGroups: true,
++        kpExperienceSettings: true,
+         settings: {
++          kpExperienceEnabled: true,
+           initiatives: {
+             routing: { name: "Routing", coordinatorThreadId: a.id, memberThreadIds: [a.id, b.id] },
+             other: { name: "Other", coordinatorThreadId: null, memberThreadIds: [hidden.id] },
+@@ -104,6 +106,27 @@ it("uses grouped order and scope for ranges while excluding collapsed and unrela
+   ]);
+   expect(layout.keys.has("local:unrelated")).toBe(false);
+   expect(layout.keys.has("local:hidden")).toBe(true);
++  const disabledConfigs = new Map(
++    [...configs].map(([environmentId, config]) => [
++      environmentId,
++      { ...config, settings: { ...config.settings, kpExperienceEnabled: false } },
++    ]),
++  );
++  const disabled = initiativeLayout([a, unrelated, b, hidden], disabledConfigs, null, []);
++  expect(disabled.groups).toEqual([]);
++  expect([...disabled.keys]).toEqual([]);
++  expect(disabled.memberThreads).toEqual([]);
++  const legacyConfigs = new Map(
++    [...disabledConfigs].map(
++      ([environmentId, { kpExperienceSettings: _capability, ...config }]) => [
++        environmentId,
++        config,
++      ],
++    ),
++  );
++  expect(initiativeLayout([a, unrelated, b, hidden], legacyConfigs, null, []).groups).toHaveLength(
++    2,
++  );
+   const scoped = initiativeLayout([a, unrelated, b, hidden], configs, new Set(["local:ui"]), []);
+   expect(scoped.visibleThreads.map((thread) => thread.id)).toEqual([]);
+   expect(scoped.groups[0]?.settledThreadIds).toEqual([b.id]);
+diff --git a/apps/web/src/components/InitiativeSidebar.logic.ts b/apps/web/src/components/InitiativeSidebar.logic.ts
+index a7949e0ce1..e82379c494 100644
+--- a/apps/web/src/components/InitiativeSidebar.logic.ts
++++ b/apps/web/src/components/InitiativeSidebar.logic.ts
+@@ -1,5 +1,6 @@
+ import type { Initiative, Initiatives, EnvironmentId, ThreadId } from "@t3tools/contracts";
+ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
++import { initiativeGroupsEnabled } from "@t3tools/shared/initiatives";
+ import { resolveSidebarThreadStatus } from "./Sidebar.logic";
+ 
+ export function initiativeMembers(group: Initiative): readonly ThreadId[] {
+@@ -82,7 +83,11 @@ export function initiativeLayout(
+   threads: readonly EnvironmentThreadShell[],
+   configs: ReadonlyMap<
+     EnvironmentId,
+-    { initiativeGroups?: boolean; settings: { initiatives?: Initiatives } }
++    {
++      initiativeGroups?: boolean;
++      kpExperienceSettings?: boolean;
++      settings: { initiatives?: Initiatives; kpExperienceEnabled?: boolean };
++    }
+   >,
+   scopedProjectKeys: ReadonlySet<string> | null,
+   collapsed: readonly string[],
+@@ -95,7 +100,7 @@ export function initiativeLayout(
+   const memberThreads: EnvironmentThreadShell[] = [];
+   const groups: InitiativeSidebarGroup[] = [];
+   for (const [environmentId, config] of [...configs].sort(([a], [b]) => a.localeCompare(b))) {
+-    if (config.initiativeGroups !== true) continue;
++    if (!initiativeGroupsEnabled(config)) continue;
+     for (const [id, group] of Object.entries(config.settings.initiatives ?? {})) {
+       const allIds = initiativeMembers(group);
+       for (const threadId of allIds) keys.add(`${environmentId}:${threadId}`);
+diff --git a/apps/web/src/components/InitiativeSidebar.tsx b/apps/web/src/components/InitiativeSidebar.tsx
+index 89f476d56e..72d736145b 100644
+--- a/apps/web/src/components/InitiativeSidebar.tsx
++++ b/apps/web/src/components/InitiativeSidebar.tsx
+@@ -1,3 +1,4 @@
++import { initiativeGroupsEnabled } from "@t3tools/shared/initiatives";
+ import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+ import {
+   openInitiativeEditor,
+@@ -12,6 +13,7 @@ import * as Schema from "effect/Schema";
+ import { ChevronDownIcon, EllipsisIcon } from "lucide-react";
+ import { appAtomRegistry } from "../rpc/atomRegistry";
+ import { threadFamilies } from "../state/threads";
++import { useEnvironments } from "../state/environments";
+ import { useUpdateEnvironmentSettings } from "../hooks/useSettings";
+ import { useLocalStorage } from "../hooks/useLocalStorage";
+ import { Button } from "./ui/button";
+@@ -77,6 +79,13 @@ function GroupEditor({
+   const [members, setMembers] = useState(new Set(initiativeMembers(target.group)));
+   const [busy, setBusy] = useState(false);
+   const closed = useRef(false);
++  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- cancels pending multi-step saves when the editor unmounts, including after external disable
++  useEffect(() => {
++    closed.current = false;
++    return () => {
++      closed.current = true;
++    };
++  }, []);
+   const dismiss = () => {
+     closed.current = true;
+     onClose();
+@@ -398,7 +407,19 @@ function InitiativeGroup({
+ 
+ export function InitiativeEditorHost({ threads }: Pick<Props, "threads">) {
+   const editing = useInitiativeEditor();
+-  return editing === null ? null : (
++  const { environments } = useEnvironments();
++  const enabled =
++    editing !== null &&
++    environments.some(
++      (environment) =>
++        environment.environmentId === editing.environmentId &&
++        initiativeGroupsEnabled(environment.serverConfig),
++    );
++  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- dismisses stale editor state when its environment disables the KP Experience externally
++  useEffect(() => {
++    if (editing !== null && !enabled) closeInitiativeEditor();
++  }, [editing, enabled]);
++  return editing === null || !enabled ? null : (
+     <GroupEditor
+       key={`${editing.environmentId}:${editing.id}`}
+       target={editing}
+diff --git a/apps/web/src/components/NewInitiativeThreadDialog.tsx b/apps/web/src/components/NewInitiativeThreadDialog.tsx
+index e4f0536f47..29e9c5355d 100644
+--- a/apps/web/src/components/NewInitiativeThreadDialog.tsx
++++ b/apps/web/src/components/NewInitiativeThreadDialog.tsx
+@@ -1,3 +1,4 @@
++import { initiativeGroupsEnabled } from "@t3tools/shared/initiatives";
+ import { retainSavedThreadWorkspace } from "../composerDraftStore";
+ import { resolveDefaultNewThreadEnvMode } from "../hooks/useHandleNewThread";
+ import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
+@@ -14,7 +15,7 @@ import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+ import { LayersIcon } from "lucide-react";
+ import * as Schema from "effect/Schema";
+ import { useLocalStorage } from "../hooks/useLocalStorage";
+-import { useRef, useState } from "react";
++import { useEffect, useRef, useState } from "react";
+ 
+ import { newThreadId, newDraftId, randomUUID } from "../lib/utils";
+ import { resolveProjectDefaultProviderModelSelection } from "../providerInstances";
+@@ -52,8 +53,7 @@ export function NewInitiativeButton() {
+   const writable = useEnvironmentsWithScope(environments, AuthSettingsWriteScope);
+   const supported = environments.filter(
+     (environment) =>
+-      environment.serverConfig?.initiativeGroups === true &&
+-      writable.has(environment.environmentId),
++      initiativeGroupsEnabled(environment.serverConfig) && writable.has(environment.environmentId),
+   );
+   const open = (environmentId: InitiativeSidebarGroup["environmentId"]) =>
+     openInitiativeEditor({
+@@ -115,12 +115,30 @@ export function NewInitiativeThreadDialog({
+     collapsedSchema,
+   );
+   const inFlight = useRef(false);
++  const cancelled = useRef(false);
++  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- stops pending dialog work after dismissal or external feature disable
++  useEffect(() => {
++    cancelled.current = false;
++    return () => {
++      cancelled.current = true;
++    };
++  }, []);
+   const create = useOrchestrationCommand(threadEnvironment.create, { reportFailure: false });
+   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
+   const canWrite = useEnvironmentScope(target.environmentId, AuthSettingsWriteScope);
+   const canOperate = useEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope);
++  const { environments } = useEnvironments();
++  const enabled = environments.some(
++    (environment) =>
++      environment.environmentId === target.environmentId &&
++      initiativeGroupsEnabled(environment.serverConfig),
++  );
++  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- closes the dialog when its environment disables the KP Experience externally
++  useEffect(() => {
++    if (!enabled) onClose();
++  }, [enabled, onClose]);
+   const start = async (now: number) => {
+-    if (inFlight.current) return;
++    if (inFlight.current || cancelled.current) return;
+     if (
+       !readEnvironmentScope(target.environmentId, AuthSettingsWriteScope) ||
+       !readEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope)
+@@ -132,7 +150,8 @@ export function NewInitiativeThreadDialog({
+     const config = appAtomRegistry.get(environmentServerConfigsAtom).get(target.environmentId);
+     if (
+       !project ||
+-      config?.initiativeGroups !== true ||
++      config === undefined ||
++      !initiativeGroupsEnabled(config) ||
+       !Object.hasOwn(config.settings.initiatives, target.id)
+     ) {
+       setError("This project or initiative is no longer available.");
+@@ -168,6 +187,7 @@ export function NewInitiativeThreadDialog({
+           config.settings,
+           config.newProjectsRoot,
+         );
++        if (cancelled.current) return;
+         setProjectId(project.id);
+         setAttempted(true);
+         const result = await create({
+@@ -184,6 +204,7 @@ export function NewInitiativeThreadDialog({
+             worktreePath: null,
+           },
+         });
++        if (cancelled.current) return;
+         if (result._tag === "Failure") {
+           setError("Could not create the thread. Try again.");
+           return;
+@@ -204,6 +225,13 @@ export function NewInitiativeThreadDialog({
+         );
+         setCreated(requestId.current);
+       }
++      if (
++        cancelled.current ||
++        !initiativeGroupsEnabled(
++          appAtomRegistry.get(environmentServerConfigsAtom).get(target.environmentId),
++        )
++      )
++        return;
+       const assigned = await update({
+         environmentId: target.environmentId,
+         input: {
+@@ -212,6 +240,7 @@ export function NewInitiativeThreadDialog({
+           },
+         },
+       });
++      if (cancelled.current) return;
+       if (
+         assigned._tag === "Failure" ||
+         !assigned.value.initiatives[target.id]?.memberThreadIds.includes(requestId.current)
+@@ -239,6 +268,7 @@ export function NewInitiativeThreadDialog({
+     inFlight.current = false;
+     setBusy(false);
+   };
++  if (!enabled) return null;
+   return (
+     <Dialog
+       open
+diff --git a/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx b/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
+index c1f6ef814c..fdaccc2e51 100644
+--- a/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
++++ b/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
+@@ -18,9 +18,12 @@ import {
+   threadWithHistory,
+   savedServerSettings,
+   dispatchedCommands,
++  releaseThreadCreation,
++  emitServerSettings,
++  serverSettingsWrites,
+   type FakeDriver,
+ } from "../../test/fakeEnvironment";
+-import { render } from "../../test/render";
++import { act, render } from "../../test/render";
+ 
+ vi.mock("../../../../packages/client-runtime/src/connection/driver.ts", async (importOriginal) => {
+   const [actual, { fakeDriver }, Layer] = await Promise.all([
+@@ -52,6 +55,7 @@ it("retries grouping the same new thread and opens the initiative editor while s
+     acceptSettingsUpdates: true,
+     settingsUpdateFailures: 1,
+     settings: {
++      kpExperienceEnabled: true,
+       defaultThreadEnvMode: "worktree",
+       initiatives: {
+         routing: { name: "Routing", coordinatorThreadId: pm.id, memberThreadIds: [pm.id] },
+@@ -113,3 +117,41 @@ it("retries grouping the same new thread and opens the initiative editor while s
+   expect(router.state.location.pathname).toBe(`/${ENVIRONMENT_ID}/${created[0]!.threadId}`);
+   expect(JSON.parse(localStorage.getItem("t3code:initiatives:collapsed")!)).toEqual([]);
+ });
++
++it("does not resume dismissed creation when the KP Experience is enabled again", async () => {
++  settings();
++  const pm = threadWithHistory("cancelled-creation-pm", 1);
++  using _environment = installFakeEnvironment([pm], {
++    initiativeGroups: true,
++    acceptCommands: true,
++    holdThreadCreation: true,
++    acceptSettingsUpdates: true,
++    settings: {
++      kpExperienceEnabled: true,
++      initiatives: {
++        routing: { name: "Routing", coordinatorThreadId: pm.id, memberThreadIds: [pm.id] },
++      },
++    },
++  });
++  const router = getRouter(
++    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${pm.id}`] }),
++  );
++  await router.load();
++  // AppRoot owns the application router.
++  await using _app = await render(<AppRoot router={router} />, { router: false });
++  await page.getByRole("button", { name: "Manage Routing", exact: true }).click();
++  await page.getByRole("menuitem", { name: "New thread…", exact: true }).click();
++  await page.getByRole("button", { name: "Create thread", exact: true }).click();
++  await vi.waitFor(() =>
++    expect(dispatchedCommands().filter((command) => command.type === "thread.create")).toHaveLength(
++      1,
++    ),
++  );
++  await act(() => emitServerSettings({ kpExperienceEnabled: false }));
++  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
++  await act(() => emitServerSettings({ kpExperienceEnabled: true }));
++  await act(releaseThreadCreation);
++  expect(savedServerSettings().initiatives.routing?.memberThreadIds).toEqual([pm.id]);
++  expect(serverSettingsWrites().some((patch) => patch.initiativeChange !== undefined)).toBe(false);
++  expect(router.state.location.pathname).toBe(`/${ENVIRONMENT_ID}/${pm.id}`);
++});
+diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
+index 1d9cf04a14..fc8c697d11 100644
+--- a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
++++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
+@@ -96,6 +96,7 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+       project(foreign.projectId, "foreign-repository"),
+     ],
+     settings: {
++      kpExperienceEnabled: true,
+       initiatives: {
+         routing: {
+           name: "Routing",
+diff --git a/apps/web/src/components/settings/LabsSettingsPanel.tsx b/apps/web/src/components/settings/LabsSettingsPanel.tsx
+index 38be7d6115..8a9bdd4801 100644
+--- a/apps/web/src/components/settings/LabsSettingsPanel.tsx
++++ b/apps/web/src/components/settings/LabsSettingsPanel.tsx
+@@ -17,6 +17,7 @@ import { firstManagedDenial, usePrimaryManagedPolicy } from "~/state/managedPoli
+ export function LabsSettingsPanel() {
+   return (
+     <SettingsPageContainer>
++      <KpExperienceSection />
+       <SettingsSection id="beta" title="Beta">
+         <BoringSidebarRow />
+         {/* Clerk is only mounted when this build has T3 Connect. */}
+@@ -30,6 +31,40 @@ export function LabsSettingsPanel() {
+   );
+ }
+ 
++function KpExperienceSection() {
++  const { scope, connectedEnvironments } = useSettingsScope();
++  const settings = useScopedSettings();
++  const updateSettings = useUpdateScopedSettings();
++  const supported = connectedEnvironments.filter(
++    (environment) => environment.serverConfig?.kpExperienceSettings === true,
++  );
++  if (scope.kind === "project" || scope.kind === "checkout" || supported.length === 0) return null;
++  const allSupported = supported.length === connectedEnvironments.length;
++  return (
++    <SettingsSection id="kp-experience" title="The KP Experience">
++      <SettingsRow
++        serverScoped
++        {...searchableSetting("kp-experience")}
++        settingKeys={["kpExperienceEnabled"]}
++        description={
++          allSupported
++            ? "Group sessions into initiatives with a PM, status summaries, and a Settled section. Agent-launched sessions inherit their caller’s group. Turning this off keeps saved groups and sessions."
++            : "Select a compatible environment above to change this setting."
++        }
++        control={
++          <ScopedSwitch
++            settingKeys={["kpExperienceEnabled"]}
++            checked={settings.kpExperienceEnabled}
++            disabled={!allSupported}
++            onCheckedChange={(checked) => updateSettings({ kpExperienceEnabled: Boolean(checked) })}
++            aria-label="Enable the KP Experience"
++          />
++        }
++      />
++    </SettingsSection>
++  );
++}
++
+ function BoringSidebarRow() {
+   const settings = useScopedSettings();
+   const updateSettings = useUpdateScopedSettings();
+diff --git a/apps/web/src/components/settings/settingsSearch.ts b/apps/web/src/components/settings/settingsSearch.ts
+index 4f61ba41c0..d56b437dbd 100644
+--- a/apps/web/src/components/settings/settingsSearch.ts
++++ b/apps/web/src/components/settings/settingsSearch.ts
+@@ -461,6 +461,12 @@ export const SETTINGS_SEARCH_ITEMS = [
+     to: "/settings/general",
+     searchTerms: ["hide fold running monitoring threads inbox sidebar shelf"],
+   },
++  {
++    id: "kp-experience",
++    title: "Enable the KP Experience",
++    to: "/settings/labs",
++    searchTerms: ["kp initiatives grouping project manager settled sessions"],
++  },
+   {
+     id: "boring-sidebar",
+     title: "Boring sidebar (group by project)",
+diff --git a/apps/web/src/hooks/useInitiativeThreadActions.ts b/apps/web/src/hooks/useInitiativeThreadActions.ts
+index 4cc9efda7e..58c90410de 100644
+--- a/apps/web/src/hooks/useInitiativeThreadActions.ts
++++ b/apps/web/src/hooks/useInitiativeThreadActions.ts
+@@ -1,5 +1,5 @@
+ import { AuthSettingsWriteScope, type ScopedThreadRef } from "@t3tools/contracts";
+-import { initiativeForThread } from "@t3tools/shared/initiatives";
++import { initiativeForThread, initiativeGroupsEnabled } from "@t3tools/shared/initiatives";
+ import { openInitiativeEditor } from "../components/initiativeEditor";
+ import type {
+   ThreadActionMenuId,
+@@ -19,7 +19,8 @@ import {
+ 
+ function currentConfig(ref: ScopedThreadRef) {
+   const config = appAtomRegistry.get(environmentServerConfigsAtom).get(ref.environmentId);
+-  return config?.initiativeGroups === true &&
++  return config !== undefined &&
++    initiativeGroupsEnabled(config) &&
+     readEnvironmentScope(ref.environmentId, AuthSettingsWriteScope)
+     ? config
+     : null;
+diff --git a/apps/web/test/fakeEnvironment.ts b/apps/web/test/fakeEnvironment.ts
+index a3571e5cb2..835aee898a 100644
+--- a/apps/web/test/fakeEnvironment.ts
++++ b/apps/web/test/fakeEnvironment.ts
+@@ -43,6 +43,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+ import { APP_VERSION } from "~/branding";
+ import * as DateTime from "effect/DateTime";
+ import * as Effect from "effect/Effect";
++import * as Deferred from "effect/Deferred";
+ import * as Queue from "effect/Queue";
+ import type * as Scope from "effect/Scope";
+ import * as Schema from "effect/Schema";
+@@ -338,6 +339,8 @@ let projects: ReadonlyArray<OrchestrationProjectShell> = [project];
+ let configOverrides: Partial<ServerConfig> = {};
+ let dispatched: OrchestrationV2Command[] = [];
+ let acceptCommands = false;
++let holdThreadCreation = false;
++const pendingThreadCreations: Deferred.Deferred<{ readonly sequence: number }>[] = [];
+ let acceptSettingsUpdates = false;
+ let settingsUpdateFailures = 0;
+ let settingsWrites: ServerSettingsPatch[] = [];
+@@ -380,9 +383,15 @@ const handlers: Record<string, (input: never) => unknown> = {
+   // Recorded, and accepted only when the scenario asks, since a pending command holds every
+   // later command on its thread. Accepted commands' events never arrive.
+   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command: OrchestrationV2Command) =>
+-    Effect.suspend(() => {
++    Effect.gen(function* () {
+       dispatched.push(command);
+-      return acceptCommands ? Effect.succeed({ sequence: sequence + 1 }) : Effect.never;
++      if (!acceptCommands) return yield* Effect.never;
++      if (holdThreadCreation && command.type === "thread.create") {
++        const pending = yield* Deferred.make<{ readonly sequence: number }>();
++        pendingThreadCreations.push(pending);
++        return yield* Deferred.await(pending);
++      }
++      return { sequence: sequence + 1 };
+     }),
+   [WS_METHODS.subscribeTerminalMetadata]: () =>
+     subscribe<TerminalMetadataStreamEvent>([{ type: "snapshot", terminals: [] }], (queue) => {
+@@ -505,6 +514,7 @@ export function installFakeEnvironment(
+   fixtures: ReadonlyArray<FakeThread>,
+   options?: {
+     readonly acceptCommands?: boolean;
++    readonly holdThreadCreation?: boolean;
+     readonly acceptSettingsUpdates?: boolean;
+     readonly settingsUpdateFailures?: number;
+     readonly settings?: Partial<ServerConfig["settings"]>;
+@@ -520,10 +530,15 @@ export function installFakeEnvironment(
+       : { settings: { ...baseServerConfig.settings, ...options.settings } }),
+     ...(options?.initiativeGroups === undefined
+       ? {}
+-      : { initiativeGroups: options.initiativeGroups }),
++      : {
++          initiativeGroups: options.initiativeGroups,
++          kpExperienceSettings: options.initiativeGroups,
++        }),
+   };
+   dispatched = [];
+   acceptCommands = options?.acceptCommands === true;
++  holdThreadCreation = options?.holdThreadCreation === true;
++  pendingThreadCreations.length = 0;
+   acceptSettingsUpdates = options?.acceptSettingsUpdates === true;
+   settingsUpdateFailures = options?.settingsUpdateFailures ?? 0;
+   settingsWrites = [];
+@@ -563,6 +578,26 @@ export function dispatchedCommands(): ReadonlyArray<OrchestrationV2Command> {
+   return dispatched;
+ }
+ 
++export async function releaseThreadCreation(): Promise<void> {
++  await Effect.runPromise(
++    Effect.forEach(pendingThreadCreations.splice(0), (pending) =>
++      Deferred.succeed(pending, { sequence: sequence + 1 }),
++    ),
++  );
++}
++
++export async function emitServerSettings(patch: ServerSettingsPatch): Promise<void> {
++  configOverrides = {
++    ...configOverrides,
++    settings: applyServerSettingsPatch(serverConfig().settings, patch),
++  };
++  await Effect.runPromise(
++    Effect.forEach(configSubscribers, (queue) =>
++      Queue.offer(queue, { version: 1, type: "snapshot", config: serverConfig() }),
++    ),
++  );
++}
++
+ export function serverSettingsWrites(): ReadonlyArray<ServerSettingsPatch> {
+   return settingsWrites;
+ }
+diff --git a/packages/shared/src/initiatives.ts b/packages/shared/src/initiatives.ts
+index eb2e5018b7..d39c8d3300 100644
+--- a/packages/shared/src/initiatives.ts
++++ b/packages/shared/src/initiatives.ts
+@@ -1,5 +1,21 @@
+ import type { InitiativeChange, Initiatives, ThreadId } from "@t3tools/contracts";
+ 
++export function initiativeGroupsEnabled(
++  config:
++    | {
++        readonly initiativeGroups?: boolean;
++        readonly kpExperienceSettings?: boolean;
++        readonly settings: { readonly kpExperienceEnabled?: boolean };
++      }
++    | null
++    | undefined,
++): boolean {
++  return (
++    config?.initiativeGroups === true &&
++    (config.kpExperienceSettings !== true || config.settings.kpExperienceEnabled === true)
++  );
++}
++
+ export function initiativeForThread(
+   initiatives: Initiatives,
+   threadId: ThreadId,
+diff --git a/scripts/scenarios/kp-experience.e2e.ts b/scripts/scenarios/kp-experience.e2e.ts
+new file mode 100644
+index 0000000000..26aec3e934
+--- /dev/null
++++ b/scripts/scenarios/kp-experience.e2e.ts
+@@ -0,0 +1,68 @@
++import { expect } from "e2e";
++
++import { test, WEB } from "./t3.ts";
++
++test(
++  "The KP Experience preserves saved initiatives while disabled",
++  WEB,
++  async ({ t3, app, screen, browser }) => {
++    const project = await t3.project("kp-experience");
++    await t3.thread({ project, title: "KP manager", messages: ["first"] });
++    await t3.thread({ project, title: "KP worker", messages: ["first"] });
++    await t3.open();
++    await expect(screen.getByRole("button", "New initiative", { exact: true })).toBeVisible();
++    await app.open("/settings/labs");
++    const toggle = screen.getByRole("switch", "Enable the KP Experience", { exact: true });
++    await expect(toggle).toBeChecked();
++    await toggle.tap();
++    await expect(toggle).not.toBeChecked();
++    await app.screenshot("kp-labs-disabled");
++    await app.open("/settings/labs");
++    await expect(toggle).not.toBeChecked();
++    await app.open("/");
++    await expect(screen.getByRole("button", "New initiative", { exact: true })).toBeHidden();
++
++    await app.open("/settings/labs");
++    await toggle.tap();
++    await expect(toggle).toBeChecked();
++    await app.screenshot("kp-labs-enabled");
++    await app.open("/");
++    await screen.getByRole("button", "New initiative", { exact: true }).tap();
++    await screen.getByLabel("Name").fill("KP validation");
++    await screen.getByLabel("Project manager").selectOption({ label: "KP manager" });
++    await screen.getByLabel("KP worker").check();
++    await screen.getByRole("button", "Save", { exact: true }).tap();
++    const header = screen.getByRole("button", { name: /^KP validation:/ });
++    await expect(header).toBeVisible();
++    await app.screenshot("kp-initiatives-enabled");
++
++    await app.open("/settings/labs");
++    await toggle.tap();
++    await expect(toggle).not.toBeChecked();
++    await app.open("/");
++    await expect(header).toBeHidden();
++    await expect(screen.getByRole("button", "New initiative", { exact: true })).toBeHidden();
++    const worker = screen.getByRole("button", { name: /KP worker,/ });
++    await expect(worker).toBeVisible();
++    await worker.secondaryTap();
++    await expect(screen.getByRole("menuitem", "Initiatives", { exact: true })).toBeHidden();
++    await browser.keyboard.press("Escape");
++    await app.screenshot("kp-ordinary-sidebar");
++
++    await app.open("/settings/labs");
++    await expect(toggle).not.toBeChecked();
++    await toggle.tap();
++    await app.open("/");
++    await expect(header).toBeVisible();
++    await expect(screen.getByRole("button", { name: /Project manager, KP manager/ })).toBeVisible();
++    await expect(worker).toBeVisible();
++    await worker.secondaryTap();
++    await screen.getByRole("menuitem", "Initiatives", { exact: true }).hover();
++    await expect(
++      screen.getByRole("menuitem", "Remove from KP validation", { exact: true }),
++    ).toBeVisible();
++    await browser.keyboard.press("Escape");
++    await browser.keyboard.press("Escape");
++    await app.screenshot("kp-initiatives-restored");
++  },
++);
