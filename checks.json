@@ -52,6 +52,7 @@
         "scenarios/initiative-save.e2e.ts",
         "scenarios/initiative-settled.e2e.ts",
         "scenarios/kp-experience.e2e.ts",
+        "scenarios/initiative-archived.e2e.ts",
         "--target",
         "web"
       ]

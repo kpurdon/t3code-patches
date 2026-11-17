@@ -197,6 +197,29 @@ class ToolingTest(unittest.TestCase):
                         with self.assertRaises(tool.Stop):
                             tool.extract_node(archive, destination)
 
+    def test_launcher_is_a_registered_foreground_app_with_the_beta_icon(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            stock = root / 'Beta.app/Contents/Resources'
+            stock.mkdir(parents=True)
+            (stock / 'icon.icns').write_bytes(b'official icon')
+            with (stock.parent / 'Info.plist').open('wb') as f:
+                plistlib.dump({'CFBundleIconFile': 'icon.icns'}, f)
+            args = types.SimpleNamespace(data_dir=str(root / 'patch data'), app=str(stock.parent.parent))
+            with patch.object(tool.Path, 'home', return_value=root), patch.object(tool, 'run') as run:
+                tool.install_launcher(args)
+            app = root / 'Applications/T3 Code (Patched Beta).app'
+            contents = app / 'Contents'
+            with (contents / 'Info.plist').open('rb') as f:
+                info = plistlib.load(f)
+            self.assertFalse(info.get('LSUIElement', False))
+            self.assertFalse(info.get('LSBackgroundOnly', False))
+            self.assertEqual(info['CFBundleDisplayName'], 'T3 Code (Patched Beta)')
+            self.assertEqual((contents / 'Resources' / info['CFBundleIconFile']).read_bytes(), b'official icon')
+            run.assert_called_once_with([tool.LSREGISTER, '-f', app])
+            command = (contents / 'MacOS/launch').read_text().splitlines()[1]
+            self.assertIn(str((root / 'patch data').resolve()), tool.shlex.split(command))
+
     def test_checks_cannot_escape_the_source_checkout(self):
         for command in ({'cwd': '../other', 'argv': ['vp', 'test']}, {'cwd': '.', 'argv': 'vp test'}):
             with self.subTest(command=command), self.assertRaises(tool.Stop):
