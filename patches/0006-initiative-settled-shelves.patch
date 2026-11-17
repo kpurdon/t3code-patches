@@ -404,7 +404,7 @@ index 4f0c892418..89f476d56e 100644
                Add a project manager and execution sessions.
              </li>
 diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
-index 5b48a613a0..d29003054b 100644
+index 5b48a613a0..1d9cf04a14 100644
 --- a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 +++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 @@ -71,7 +71,8 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
@@ -460,6 +460,57 @@ index 5b48a613a0..d29003054b 100644
    await expect.element(row(foreign.title)).toBeVisible();
    await userEvent.click(
      page.getByRole("combobox", { name: "Filter threads by project", exact: true }),
+@@ -149,11 +159,14 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+   await expect.element(page.getByRole("button", { name: /^PM only initiative/ })).toBeVisible();
+   await expect.element(row(a.title)).toBeVisible();
+   await act(() => useThreadSelectionStore.getState().clearSelection());
+-  const openSessionMenu = () => userEvent.click(row(flat.title), { button: "right" });
++  const openSessionMenu = async () => {
++    await userEvent.click(row(flat.title), { button: "right" });
++    await page.getByRole("menuitem", { name: "Initiatives", exact: true }).hover();
++  };
+   const writesBeforeStart = serverSettingsWrites().length;
+   const commandsBeforeMenu = [...dispatchedCommands()];
+   await openSessionMenu();
+-  await page.getByRole("menuitem", { name: "Start initiative…", exact: true }).click();
++  await page.getByRole("menuitem", { name: "Start new…", exact: true }).click();
+   await expect.element(page.getByRole("textbox", { name: "Name" })).toHaveValue(flat.title);
+   await expect
+     .element(page.getByRole("combobox", { name: "Project manager" }))
+@@ -169,7 +182,7 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+     .element(page.getByText("No threads in local-repository yet", { exact: true }))
+     .not.toBeInTheDocument();
+   await openSessionMenu();
+-  await page.getByRole("menuitem", { name: "Remove from initiative", exact: true }).click();
++  await page.getByRole("menuitem", { name: `Remove from ${flat.title}`, exact: true }).click();
+   await vi.waitFor(() =>
+     expect(
+       Object.values(savedServerSettings().initiatives).some((group) =>
+@@ -178,13 +191,13 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+     ).toBe(false),
+   );
+   await openSessionMenu();
+-  await page.getByRole("menuitem", { name: "Add to initiative", exact: true }).hover();
++  await page.getByRole("menuitem", { name: "Add to", exact: true }).hover();
+   await page.getByRole("menuitem", { name: "Routing", exact: true }).click();
+   await vi.waitFor(() =>
+     expect(savedServerSettings().initiatives.routing?.memberThreadIds).toContain(flat.id),
+   );
+   await openSessionMenu();
+-  await page.getByRole("menuitem", { name: "Move to initiative", exact: true }).hover();
++  await page.getByRole("menuitem", { name: "Move to", exact: true }).hover();
+   await page.getByRole("menuitem", { name: "Other work", exact: true }).click();
+   await vi.waitFor(() =>
+     expect(savedServerSettings().initiatives.other?.memberThreadIds).toContain(flat.id),
+@@ -193,7 +206,7 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+   await page.getByRole("button", { name: /^Other work/ }).click();
+   await expect.element(row(flat.title)).toBeVisible();
+   await openSessionMenu();
+-  await page.getByRole("menuitem", { name: "Remove from initiative", exact: true }).click();
++  await page.getByRole("menuitem", { name: "Remove from Other work", exact: true }).click();
+   await vi.waitFor(() =>
+     expect(savedServerSettings().initiatives.other?.memberThreadIds).not.toContain(flat.id),
+   );
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
 index 94af06d445..52fa711259 100644
 --- a/apps/web/src/components/Sidebar.tsx
@@ -531,12 +582,144 @@ index 94af06d445..52fa711259 100644
                        }
                        return items;
                      })()}
+diff --git a/apps/web/src/components/threadActionMenu.logic.test.ts b/apps/web/src/components/threadActionMenu.logic.test.ts
+index d2a3bff9bf..8b8e166dbd 100644
+--- a/apps/web/src/components/threadActionMenu.logic.test.ts
++++ b/apps/web/src/components/threadActionMenu.logic.test.ts
+@@ -36,14 +36,21 @@ describe("buildThreadActionMenuItems", () => {
+       canOperate: false,
+       initiative: { currentId: null, groups: [{ id: "routing", name: "Routing" }] },
+     });
+-    const assign = items.find((item) => item.id === "initiative:assign");
++    const initiative = items.find((item) => item.id === "initiative:menu");
++    expect(initiative).toMatchObject({ label: "Initiatives" });
++    expect(initiative?.disabled).not.toBe(true);
++    const actions = initiative?.children ?? [];
++    const assign = actions.find((item) => item.id === "initiative:assign");
+     expect(assign).toMatchObject({
+-      label: "Add to initiative",
++      label: "Add to",
+       disabled: false,
+       children: [{ id: "initiative:assign:routing", label: "Routing" }],
+     });
+-    expect(items.find((item) => item.id === "initiative:start")?.disabled).not.toBe(true);
+-    expect(items.some((item) => item.id.startsWith("initiative:remove:"))).toBe(false);
++    expect(actions.find((item) => item.id === "initiative:start")).toMatchObject({
++      label: "Start new…",
++    });
++    expect(actions.find((item) => item.id === "initiative:start")?.disabled).not.toBe(true);
++    expect(actions.some((item) => item.id.startsWith("initiative:remove:"))).toBe(false);
+     expect(threadActionRequiresOperate("initiative:assign:routing")).toBe(false);
+     expect(items.find((item) => item.id === "settle")?.disabled).toBe(true);
+   });
+@@ -59,11 +66,27 @@ describe("buildThreadActionMenuItems", () => {
+         ],
+       },
+     });
+-    expect(items.find((item) => item.id === "initiative:assign")).toMatchObject({
+-      label: "Move to initiative",
++    const actions = items.find((item) => item.id === "initiative:menu")?.children ?? [];
++    expect(actions.map((item) => item.id)).toEqual([
++      "initiative:start",
++      "initiative:remove:routing",
++      "initiative:assign",
++    ]);
++    expect(actions.find((item) => item.id === "initiative:assign")).toMatchObject({
++      label: "Move to",
+       children: [{ id: "initiative:assign:scanning", label: "Scanning" }],
+     });
+-    expect(items.some((item) => item.id === "initiative:remove:routing")).toBe(true);
++    expect(actions.find((item) => item.id === "initiative:remove:routing")).toMatchObject({
++      label: "Remove from Routing",
++    });
++    const onlyCurrent = buildThreadActionMenuItems({
++      ...baseState,
++      initiative: { currentId: "routing", groups: [{ id: "routing", name: "Routing" }] },
++    }).find((item) => item.id === "initiative:menu");
++    expect(onlyCurrent?.children?.find((item) => item.id === "initiative:assign")).toMatchObject({
++      disabled: true,
++      children: [],
++    });
+     expect(
+       buildThreadActionMenuItems(baseState).some((item) => item.id.startsWith("initiative:")),
+     ).toBe(false);
+diff --git a/apps/web/src/components/threadActionMenu.logic.ts b/apps/web/src/components/threadActionMenu.logic.ts
+index 4fc92edaf0..0b37a7fdb1 100644
+--- a/apps/web/src/components/threadActionMenu.logic.ts
++++ b/apps/web/src/components/threadActionMenu.logic.ts
+@@ -2,6 +2,7 @@ import type { ContextMenuItem } from "@t3tools/contracts";
+ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
+ 
+ export type ThreadActionMenuId =
++  | "initiative:menu"
+   | "initiative:start"
+   | "initiative:assign"
+   | `initiative:assign:${string}`
+@@ -130,30 +131,37 @@ export function buildThreadActionMenuItems(
+   const items: ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> = [
+     ...(state.initiative
+       ? [
+-          { id: "initiative:start" as const, label: "Start initiative…", icon: "folder-plus" },
+           {
+-            id: "initiative:assign" as const,
+-            label: state.initiative.currentId === null ? "Add to initiative" : "Move to initiative",
++            id: "initiative:menu" as const,
++            label: "Initiatives",
+             icon: "folder-tree",
+-            disabled: !state.initiative.groups.some(
+-              (group) => group.id !== state.initiative?.currentId,
+-            ),
+-            children: state.initiative.groups
+-              .filter((group) => group.id !== state.initiative?.currentId)
+-              .map((group) => ({
+-                id: `initiative:assign:${group.id}` as const,
+-                label: group.name,
+-              })),
++            children: [
++              { id: "initiative:start" as const, label: "Start new…", icon: "folder-plus" },
++              ...(state.initiative.currentId === null
++                ? []
++                : [
++                    {
++                      id: `initiative:remove:${state.initiative.currentId}` as const,
++                      label: `Remove from ${state.initiative.groups.find((group) => group.id === state.initiative?.currentId)?.name ?? state.initiative.currentId}`,
++                      icon: "folder-minus",
++                    },
++                  ]),
++              {
++                id: "initiative:assign" as const,
++                label: state.initiative.currentId === null ? "Add to" : "Move to",
++                icon: "folder-tree",
++                disabled: !state.initiative.groups.some(
++                  (group) => group.id !== state.initiative?.currentId,
++                ),
++                children: state.initiative.groups
++                  .filter((group) => group.id !== state.initiative?.currentId)
++                  .map((group) => ({
++                    id: `initiative:assign:${group.id}` as const,
++                    label: group.name,
++                  })),
++              },
++            ],
+           },
+-          ...(state.initiative.currentId === null
+-            ? []
+-            : [
+-                {
+-                  id: `initiative:remove:${state.initiative.currentId}` as const,
+-                  label: "Remove from initiative",
+-                  icon: "folder-minus",
+-                },
+-              ]),
+         ]
+       : []),
+     ...(state.canFind
 diff --git a/scripts/scenarios/initiative-settled.e2e.ts b/scripts/scenarios/initiative-settled.e2e.ts
 new file mode 100644
-index 0000000000..885aded7a1
+index 0000000000..f352ddbc98
 --- /dev/null
 +++ b/scripts/scenarios/initiative-settled.e2e.ts
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,59 @@
 +import { expect } from "e2e";
 +
 +import { test, WEB } from "./t3.ts";
@@ -578,5 +761,21 @@ index 0000000000..885aded7a1
 +    await expect(worker).toBeVisible();
 +    await expect(shelf).toBeHidden();
 +    await app.screenshot("initiative-reopened");
++    await worker.secondaryTap();
++    await screen.getByRole("menuitem", "Initiatives", { exact: true }).hover();
++    await expect(screen.getByRole("menuitem", "Start new…", { exact: true })).toBeVisible();
++    await app.screenshot("initiative-session-menu");
++    await screen
++      .getByRole("menuitem", "Remove from Initiative session management", { exact: true })
++      .tap();
++    await worker.secondaryTap();
++    await screen.getByRole("menuitem", "Initiatives", { exact: true }).hover();
++    await screen.getByRole("menuitem", "Add to", { exact: true }).hover();
++    await screen.getByRole("menuitem", "Initiative session management", { exact: true }).tap();
++    await worker.secondaryTap();
++    await screen.getByRole("menuitem", "Initiatives", { exact: true }).hover();
++    await expect(
++      screen.getByRole("menuitem", "Remove from Initiative session management", { exact: true }),
++    ).toBeVisible();
 +  },
 +);
