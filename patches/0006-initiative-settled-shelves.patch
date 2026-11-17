@@ -1,16 +1,37 @@
 diff --git a/apps/web/src/components/InitiativeSidebar.browser.test.tsx b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
-index ea36a795c6..a30fd5f690 100644
+index ea36a795c6..d2ded2d729 100644
 --- a/apps/web/src/components/InitiativeSidebar.browser.test.tsx
 +++ b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
-@@ -100,6 +100,7 @@ const view = () => (
+@@ -6,10 +6,12 @@ import {
+ } from "@t3tools/contracts";
+ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+ import { applyInitiativeChange } from "@t3tools/shared/initiatives";
++import * as Schema from "effect/Schema";
+ import "~/index.css";
+ import { expect, it, vi } from "vite-plus/test";
+ import { page } from "vite-plus/test/browser";
+ import { act, render } from "../../test/render";
++import { getLocalStorageItem, readLocalStorageValue } from "../hooks/useLocalStorage";
+ 
+ const state = vi.hoisted(() => ({
+   initiatives: {} as Initiatives,
+@@ -64,6 +66,7 @@ import { InitiativeSidebar, InitiativeEditorHost } from "./InitiativeSidebar";
+ const environmentId = EnvironmentId.make("local");
+ const pm = ThreadId.make("pm");
+ const api = ThreadId.make("api");
++const storedKeysSchema = Schema.Array(Schema.String);
+ const threads = [
+   { id: pm, title: "Routing PM", runtime: null, settledOverride: null },
+   { id: api, title: "Routing API", runtime: null, settledOverride: "settled" },
+@@ -100,6 +103,7 @@ const view = () => (
            ]),
            null,
            [],
-+          JSON.parse(localStorage.getItem("t3code:initiatives:expanded-settled") ?? "[]"),
++          readLocalStorageValue("t3code:initiatives:expanded-settled", [], storedKeysSchema),
          ).groups
        }
        renderThread={(thread) => <li>{thread.title}</li>}
-@@ -119,11 +120,17 @@ function setup() {
+@@ -119,15 +123,21 @@ function setup() {
    };
    localStorage.clear();
  }
@@ -23,13 +44,18 @@ index ea36a795c6..a30fd5f690 100644
 +  await screen.getByRole("button", { name: "Settled in Routing" }).click();
 +  await screen.rerender(view());
    await expect.element(screen.getByText("Routing API")).toBeInTheDocument();
-+  expect(JSON.parse(localStorage.getItem("t3code:initiatives:expanded-settled")!)).toEqual([
++  expect(getLocalStorageItem("t3code:initiatives:expanded-settled", storedKeysSchema)).toEqual([
 +    "initiative:local:routing:settled",
 +  ]);
    expect(state.mount.mock.calls.map((call) => call[2])).toEqual([pm, api]);
    await screen.getByRole("button", { name: /^Routing/ }).click();
    await expect.element(screen.getByText("Routing PM")).not.toBeInTheDocument();
-@@ -147,6 +154,9 @@ it("creates a named group with an explicit PM and settled worker without lifecyc
+-  expect(JSON.parse(localStorage.getItem("t3code:initiatives:collapsed")!)).toEqual([
++  expect(getLocalStorageItem("t3code:initiatives:collapsed", storedKeysSchema)).toEqual([
+     "initiative:local:routing",
+   ]);
+   expect(state.changes).toEqual([]);
+@@ -147,6 +157,9 @@ it("creates a named group with an explicit PM and settled worker without lifecyc
    expect(group.name).toBe("Routing");
    expect(group.coordinatorThreadId).toBe(pm);
    expect(new Set(group.memberThreadIds)).toEqual(new Set([pm, api]));
