@@ -2,7 +2,7 @@
 
 Focused initiative grouping patches for the official T3 Code Beta on macOS. The official application stays signed and unchanged; a separate launcher loads the rebuilt JavaScript into it.
 
-The patch adds named, collapsible initiatives spanning repository projects in one T3 environment. Select a project manager, add execution sessions, and keep them together while working, idle, snoozed, or settled. Headers summarize their status. The shaded header collapses the group; a person icon marks the PM and tree connectors lead to its execution sessions. Right-click a session to start an initiative with it as PM, or add, move, or remove its display membership. Choose **New thread…** from an initiative’s menu to select a project and create an empty session in that group. The session is saved immediately; an agent starts when you send its first message. Create initiatives from the top sidebar action row. Threads outside initiatives use compact rows beneath the groups, with their existing status headings. Removing a group keeps every session.
+The patch adds named, collapsible initiatives spanning repository projects in one T3 environment. Select a project manager, add execution sessions, and keep them together while working, idle, or snoozed. Settled sessions move into a collapsible Settled section inside their initiative; reopening restores their place in its active list. Headers summarize status with labeled counts. The shaded header collapses the group; a person icon marks the PM and tree connectors lead to its execution sessions. Use **Initiatives** in a session’s context menu to start a group with it as PM, or add, move, or remove its display membership. Choose **New thread…** from an initiative’s menu to select a project and create an empty session in that group. The session is saved immediately; an agent starts when you send its first message. Create initiatives from the top sidebar action row. Threads outside initiatives use compact rows above the groups, with their existing status headings. Removing a group keeps every session.
 
 The native `t3_initiative_list` and `t3_initiative_update` tools expose those same explicit relationships. New single and batch launches inherit their caller's display group; replaying a launch preserves subsequent moves and removals. A grouping failure returns `initiativeWarning` alongside the accepted launch, so repair the exact thread's display relationship rather than launching another one. UI groups do not adopt sessions into Builder or dispatcher's management registry.
 
@@ -44,16 +44,6 @@ The background job builds and stages only. It never starts or quits T3, ports pa
 The loader requires Beta's `RunAsNode` and startup-inspector Electron fuses. It checks both before starting any process; incompatible Betas stop without falling back to stock.
 
 A failed patch, check, or build leaves the prior artifact intact. Launch refuses an artifact for a different official Beta or modified bundle. Restart through the patched launcher after a successful update; there is no fallback that silently opens the stock app against shared data. Logs are local: `~/.local/share/t3code-patches/update.log` and `runtime.log`.
-
-## Stone theme
-
-`themes/stone.json` adapts Stone's warm gray terminal palette for the app: brighter text, distinct sage surfaces, blue selection and action colors, and richer status accents. The terminal background and foreground retain the original Stone values. Install it into the running patched environment with:
-
-```sh
-t3 theme set ./themes/stone.json --id stone
-```
-
-In Settings → Appearance, set Glass opacity to 100% for solid surfaces. Theme changes apply live and do not require rebuilding or restarting the app.
 
 ## Development
 
