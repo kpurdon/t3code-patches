@@ -1,0 +1,260 @@
+diff --git a/apps/server/src/initiatives.test.ts b/apps/server/src/initiatives.test.ts
+index cf30469085..69fb3776a7 100644
+--- a/apps/server/src/initiatives.test.ts
++++ b/apps/server/src/initiatives.test.ts
+@@ -8,6 +8,8 @@ it.effect(
+   () =>
+     Effect.gen(function* () {
+       const settings = yield* ServerSettingsService;
++      assert.isFalse((yield* settings.getSettings).kpExperienceEnabled);
++      yield* settings.updateSettings({ kpExperienceEnabled: true });
+       const pm = ThreadId.make("pm");
+       yield* settings.updateSettings({
+         initiativeChange: {
+@@ -28,6 +30,12 @@ it.effect(
+         new Set((yield* settings.getSettings).initiatives.routing?.memberThreadIds),
+         new Set([pm, ...children]),
+       );
++      const saved = (yield* settings.getSettings).initiatives;
++      yield* settings.updateSettings({ kpExperienceEnabled: false });
++      assert.deepEqual(yield* inheritInitiative(settings, pm, ThreadId.make("disabled-child")), {});
++      assert.deepEqual(yield* inheritInitiative(settings, pm, children[0]!), {});
++      assert.deepEqual((yield* settings.getSettings).initiatives, saved);
++      yield* settings.updateSettings({ kpExperienceEnabled: true });
+       yield* settings.updateSettings({
+         initiativeChange: {
+           action: "create",
+@@ -52,6 +60,7 @@ it.effect(
+ it.effect("reports a repairable display warning without rejecting an accepted launch", () =>
+   Effect.gen(function* () {
+     const settings = yield* ServerSettingsService;
++    yield* settings.updateSettings({ kpExperienceEnabled: true });
+     const pm = ThreadId.make("pm");
+     yield* settings.updateSettings({
+       initiativeChange: {
+diff --git a/apps/server/src/initiatives.ts b/apps/server/src/initiatives.ts
+index fbb41f4a28..96aba8cc5b 100644
+--- a/apps/server/src/initiatives.ts
++++ b/apps/server/src/initiatives.ts
+@@ -12,6 +12,7 @@ export const inheritInitiative = Effect.fn("initiatives.inherit")(function* (
+ ) {
+   return yield* Effect.gen(function* () {
+     const current = yield* settings.getSettings;
++    if (!current.kpExperienceEnabled) return {};
+     const existingId = initiativeForThread(current.initiatives, threadId);
+     if (existingId !== undefined) return { initiativeId: existingId };
+     if (options.isReplay === true) return {};
+@@ -20,6 +21,7 @@ export const inheritInitiative = Effect.fn("initiatives.inherit")(function* (
+     const assigned = yield* settings.updateSettings({
+       initiativeChange: { action: "assign", id: initiativeId, threadId, onlyIfUngrouped: true },
+     });
++    if (!assigned.kpExperienceEnabled) return {};
+     const assignedId = initiativeForThread(assigned.initiatives, threadId);
+     if (assignedId === undefined)
+       return yield* new OrchestratorMcpFailure({
+diff --git a/apps/server/src/mcp/OrchestratorMcpService.test.ts b/apps/server/src/mcp/OrchestratorMcpService.test.ts
+index 5902c3a9f8..c2987e3ba7 100644
+--- a/apps/server/src/mcp/OrchestratorMcpService.test.ts
++++ b/apps/server/src/mcp/OrchestratorMcpService.test.ts
+@@ -2098,6 +2098,7 @@ describe("OrchestratorMcpService provider resolution", () => {
+             { databaseLayer: layerDatabase, runEffectWorker: false },
+           );
+           const layerSettings = ServerSettings.layerTest({
++            kpExperienceEnabled: true,
+             initiatives: {
+               original: {
+                 name: "Original",
+diff --git a/apps/server/src/mcp/toolkits/initiatives.test.ts b/apps/server/src/mcp/toolkits/initiatives.test.ts
+index 2c3b8fa6cd..17645c4d22 100644
+--- a/apps/server/src/mcp/toolkits/initiatives.test.ts
++++ b/apps/server/src/mcp/toolkits/initiatives.test.ts
+@@ -79,7 +79,7 @@ const create = () =>
+     },
+   });
+ 
+-const makeHarness = () => {
++const makeHarness = (kpExperienceEnabled = true) => {
+   const threads = new Map([
+     [coordinatorId, coordinator],
+     [memberId, member],
+@@ -87,7 +87,7 @@ const makeHarness = () => {
+   const dispatch = vi.fn(() => Effect.succeed({ sequence: 1, storedEvents: [] }));
+   const layer = McpHttpServer.layerThreadToolkit.pipe(
+     Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
+-    Layer.provide(ServerSettings.layerTest()),
++    Layer.provideMerge(ServerSettings.layerTest({ kpExperienceEnabled })),
+     Layer.provide(NodeCrypto.layer),
+     Layer.provide(Layer.mock(ThreadSearch.ThreadSearch)({})),
+     Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
+@@ -198,3 +198,33 @@ it.effect("deletes only the initiative and preserves its sessions and lifecycle"
+     expect(dispatch).not.toHaveBeenCalled();
+   }).pipe(Effect.provide(layer));
+ });
++
++it.effect("requires the KP Experience and keeps saved membership across off/on transitions", () => {
++  const { layer } = makeHarness(false);
++  return Effect.gen(function* () {
++    const settings = yield* ServerSettings.ServerSettingsService;
++    expect(declaredFailure(yield* call("t3_initiative_list"))).toMatchObject({
++      code: "invalid_request",
++    });
++    expect(declaredFailure(yield* create())).toMatchObject({ code: "invalid_request" });
++    expect((yield* settings.getSettings).initiatives).toEqual({});
++    yield* settings.updateSettings({ kpExperienceEnabled: true });
++    const created = yield* create();
++    expect(created.isError).toBe(false);
++    yield* settings.updateSettings({ kpExperienceEnabled: false });
++    expect(declaredFailure(yield* call("t3_initiative_list"))).toMatchObject({
++      code: "invalid_request",
++    });
++    expect(
++      declaredFailure(
++        yield* call("t3_initiative_update", {
++          change: { action: "delete", id: "routing" },
++        }),
++      ),
++    ).toMatchObject({ code: "invalid_request" });
++    yield* settings.updateSettings({ kpExperienceEnabled: true });
++    expect((yield* call("t3_initiative_list")).structuredContent).toEqual(
++      created.structuredContent,
++    );
++  }).pipe(Effect.provide(layer));
++});
+diff --git a/apps/server/src/mcp/toolkits/thread/handlers.ts b/apps/server/src/mcp/toolkits/thread/handlers.ts
+index ca4e6c063f..4e8ff8fcc1 100644
+--- a/apps/server/src/mcp/toolkits/thread/handlers.ts
++++ b/apps/server/src/mcp/toolkits/thread/handlers.ts
+@@ -91,18 +91,26 @@ const writesThread = <P extends { readonly threadId?: ThreadId | undefined }, A,
+   handle: (params: P) => Effect.Effect<A, E, R>,
+ ) => McpToolAccess.writesThreads((params: P) => [params.threadId], handle);
+ 
++const readInitiativeSettings = Effect.fn("mcp.readInitiativeSettings")(function* () {
++  const service = yield* ServerSettingsService;
++  const settings = yield* service.getSettings.pipe(Effect.mapError(unavailable));
++  if (!settings.kpExperienceEnabled)
++    return yield* new OrchestratorMcpFailure({
++      code: "invalid_request",
++      message: "Enable the KP Experience in Settings → Labs to manage initiatives.",
++    });
++  return settings;
++});
++
+ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
+   t3_initiative_list: McpToolAccess.reads(() =>
+-    Effect.gen(function* () {
+-      const settings = yield* ServerSettingsService;
+-      return (yield* settings.getSettings.pipe(Effect.mapError(unavailable))).initiatives;
+-    }),
++    readInitiativeSettings().pipe(Effect.map((settings) => settings.initiatives)),
+   ),
+   t3_initiative_update: McpToolAccess.writesEnvironment((input) =>
+     Effect.gen(function* () {
+       const service = yield* ServerSettingsService;
+       const { change } = input;
+-      const before = (yield* service.getSettings.pipe(Effect.mapError(unavailable))).initiatives;
++      const before = (yield* readInitiativeSettings()).initiatives;
+       const existing = Object.hasOwn(before, change.id) ? before[change.id] : undefined;
+       if (change.action !== "create" && existing === undefined)
+         return yield* new OrchestratorMcpFailure({
+diff --git a/apps/server/src/serverSettings.test.ts b/apps/server/src/serverSettings.test.ts
+index 8ba97ef3be..f18ec2b761 100644
+--- a/apps/server/src/serverSettings.test.ts
++++ b/apps/server/src/serverSettings.test.ts
+@@ -176,6 +176,16 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+       assert.sameMembers([...saved.memberThreadIds], [pm, "api", "web"]);
+       assert.equal(yield* fs.readFileString(config.settingsPath), settingsFile);
+       assert.deepEqual(JSON.parse(yield* fs.readFileString(initiativesPath)).routing, saved);
++      const membershipFile = yield* fs.readFileString(initiativesPath);
++      yield* service.updateSettings({ kpExperienceEnabled: true });
++      assert.isTrue(JSON.parse(yield* fs.readFileString(config.settingsPath)).kpExperienceEnabled);
++      yield* service.updateSettings({ kpExperienceEnabled: false });
++      assert.isFalse(
++        (yield* decodeServerSettingsJson(yield* fs.readFileString(config.settingsPath)))
++          .kpExperienceEnabled,
++      );
++      assert.equal(yield* fs.readFileString(initiativesPath), membershipFile);
++      assert.deepEqual((yield* service.getSettings).initiatives.routing, saved);
+     }).pipe(Effect.provide(layerServerSettings())),
+   );
+ 
+diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
+index 395971a1cf..0b8ad16ca5 100644
+--- a/packages/contracts/src/settings.ts
++++ b/packages/contracts/src/settings.ts
+@@ -1377,6 +1377,7 @@ export const InitiativeChange = Schema.Union([
+ export type InitiativeChange = typeof InitiativeChange.Type;
+ 
+ export const ServerSettings = Schema.Struct({
++  kpExperienceEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+   initiatives: Initiatives.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
+   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+@@ -1846,6 +1847,7 @@ export const ServerSettingsPatch = Schema.Struct({
+     }),
+   ),
+   worktreesDirectory: Schema.optionalKey(TrimmedString),
++  kpExperienceEnabled: Schema.optionalKey(Schema.Boolean),
+   fastWorktreeCheckout: Schema.optionalKey(Schema.Boolean),
+   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
+   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
+diff --git a/packages/shared/src/initiatives.test.ts b/packages/shared/src/initiatives.test.ts
+index 80e688df4c..f2383df761 100644
+--- a/packages/shared/src/initiatives.test.ts
++++ b/packages/shared/src/initiatives.test.ts
+@@ -12,12 +12,27 @@ const initial = (): Initiatives =>
+   );
+ describe("initiative relationships", () => {
+   it("creates a coordinator once and keeps independent additions under serialized settings patches", () => {
+-    let settings = { ...DEFAULT_SERVER_SETTINGS, initiatives: initial() };
++    let settings = {
++      ...DEFAULT_SERVER_SETTINGS,
++      kpExperienceEnabled: true,
++      initiatives: initial(),
++    };
+     for (const threadId of [api, ui, api])
+       settings = applyServerSettingsPatch(settings, {
+         initiativeChange: { action: "assign", id: "routing", threadId },
+       });
+     expect(settings.initiatives.routing?.memberThreadIds).toEqual([pm, api, ui]);
++    settings = applyServerSettingsPatch(settings, { kpExperienceEnabled: false });
++    settings = applyServerSettingsPatch(settings, {
++      initiativeChange: {
++        action: "assign",
++        id: "routing",
++        threadId: ThreadId.make("late-child"),
++        onlyIfUngrouped: true,
++      },
++    });
++    expect(settings.initiatives.routing?.memberThreadIds).toEqual([pm, api, ui]);
++    settings = applyServerSettingsPatch(settings, { kpExperienceEnabled: true });
+     expect(settings.initiatives.routing?.coordinatorThreadId).toBe(pm);
+     expect(initiativeForThread(settings.initiatives, ui)).toBe("routing");
+     expect(initiativeForThread(settings.initiatives, ThreadId.make("outside"))).toBeUndefined();
+diff --git a/packages/shared/src/serverSettings.ts b/packages/shared/src/serverSettings.ts
+index ac61b161f8..d5fc76430c 100644
+--- a/packages/shared/src/serverSettings.ts
++++ b/packages/shared/src/serverSettings.ts
+@@ -504,7 +504,10 @@ export function applyServerSettingsPatch(
+   const nextWithReplacementsBase = {
+     ...next,
+     initiatives:
+-      initiativeChange === undefined
++      initiativeChange === undefined ||
++      (initiativeChange.action === "assign" &&
++        initiativeChange.onlyIfUngrouped === true &&
++        !current.kpExperienceEnabled)
+         ? current.initiatives
+         : applyInitiativeChange(current.initiatives, initiativeChange),
+     favorites,
+diff --git a/scripts/scenarios/start-app.ts b/scripts/scenarios/start-app.ts
+index 5dee3f26c1..ef35b5dc93 100644
+--- a/scripts/scenarios/start-app.ts
++++ b/scripts/scenarios/start-app.ts
+@@ -69,6 +69,7 @@ const prepareHome = Effect.fn("startApp.prepareHome")(function* (home: string) {
+   yield* fs.writeFileString(
+     path.join(home, "userdata/settings.json"),
+     yield* encodeSettings({
++      kpExperienceEnabled: true,
+       defaultModelSelection: REPLAY,
+       providerInstances: Object.fromEntries(
+         REAL_PROVIDERS.map((driver) => [
