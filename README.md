@@ -24,7 +24,7 @@ Install the official Beta, Git, and Python 3.9 or newer. From this checkout:
 
 Open **T3 Code (Patched Beta)** from Spotlight, or run `./t3code-patches launch`. It uses separate T3 and Chromium profiles under `~/.local/share/t3code-patches/`; it does not import or resume existing sessions. Keep the repository checkout at a stable path because the launcher references it. Run `install-launcher` again after updating launcher changes. It installs a foreground app with the Beta icon in `~/Applications` and registers it with macOS. You can drag that launcher from Finder into the Dock. The running window still belongs to the signed **T3 Code (Beta)** app; pinning its running Dock icon would reopen stock Beta without patches.
 
-Validated base: official Beta `v0.1.9` (`24e77473ecf41bc1f7142529c7911c1c1aae1d76`). Future releases must pass the patch, checks, and build again.
+Validated base: official Beta `v0.1.10` (`7d32075e3757ded707914e2450c3e392a9665765`). Future releases must pass the patch, checks, and build again.
 
 The build reads Beta's exact source revision from its installed archive, applies `patches/*.patch`, installs frozen upstream dependencies, runs `checks.json`, and builds the web, server, and desktop bundles. It downloads the exact upstream Node version when needed, verified against Node's published checksum. Native helpers and public T3 Connect settings come from your official app.
 
