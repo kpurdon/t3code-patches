@@ -112,7 +112,7 @@
       "New initiative",
       "Project manager",
       "Threads outside initiatives",
-      "Enable the KP Experience"
+      "Enable initiative management"
     ],
     "apps/server/dist/": [
       "t3_initiative_list",

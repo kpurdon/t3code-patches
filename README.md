@@ -2,7 +2,7 @@
 
 Focused initiative grouping patches for the official T3 Code Beta on macOS. The official application stays signed and unchanged; a separate launcher loads the rebuilt JavaScript into it.
 
-Enable **Settings → Labs → The KP Experience** for each environment. It is off by default; turning it off keeps saved groups and sessions. The server setting is `kpExperienceEnabled`.
+Enable **Settings → Labs → The KP Experience → Enable initiative management** for each environment. It is off by default; turning it off keeps saved groups and sessions. The server setting is `initiativeManagementEnabled`.
 
 The patch adds named, collapsible initiatives spanning repository projects in one T3 environment. Select a project manager, add execution sessions, and keep them together while working, idle, or snoozed. Settled sessions move into a collapsible Settled section inside their initiative; reopening restores their place in its active list. Headers summarize status with labeled counts. The shaded header collapses the group; a person icon marks the PM and tree connectors lead to its execution sessions. Use **Initiatives** in a session’s context menu to start a group with it as PM, or add, move, or remove its display membership. Choose **New thread…** from an initiative’s menu to select a project and create an empty session in that group. The session is saved immediately; an agent starts when you send its first message. Create initiatives from the top sidebar action row. Threads outside initiatives use compact rows above the groups, with their existing status headings. Removing a group keeps every session.
 

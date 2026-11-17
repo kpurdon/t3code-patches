@@ -1,5 +1,276 @@
+diff --git a/apps/server/src/initiatives.test.ts b/apps/server/src/initiatives.test.ts
+index e182040d95..3ca5b7bcff 100644
+--- a/apps/server/src/initiatives.test.ts
++++ b/apps/server/src/initiatives.test.ts
+@@ -8,8 +8,8 @@ it.effect(
+   () =>
+     Effect.gen(function* () {
+       const settings = yield* ServerSettingsService;
+-      assert.isFalse((yield* settings.getSettings).kpExperienceEnabled);
+-      yield* settings.updateSettings({ kpExperienceEnabled: true });
++      assert.isFalse((yield* settings.getSettings).initiativeManagementEnabled);
++      yield* settings.updateSettings({ initiativeManagementEnabled: true });
+       const pm = ThreadId.make("pm");
+       yield* settings.updateSettings({
+         initiativeChange: {
+@@ -31,14 +31,14 @@ it.effect(
+         new Set([pm, ...children]),
+       );
+       const saved = (yield* settings.getSettings).initiatives;
+-      yield* settings.updateSettings({ kpExperienceEnabled: false });
++      yield* settings.updateSettings({ initiativeManagementEnabled: false });
+       assert.deepEqual(yield* inheritInitiative(settings, pm, ThreadId.make("disabled-child")), {});
+       assert.deepEqual(yield* inheritInitiative(settings, pm, children[0]!), {});
+       assert.deepEqual((yield* settings.getSettings).initiatives, saved);
+       const disabledDuringWrite = {
+         ...settings,
+         getSettings: settings.getSettings.pipe(
+-          Effect.map((current) => ({ ...current, kpExperienceEnabled: true })),
++          Effect.map((current) => ({ ...current, initiativeManagementEnabled: true })),
+         ),
+       };
+       assert.deepEqual(
+@@ -46,7 +46,7 @@ it.effect(
+         {},
+       );
+       assert.deepEqual((yield* settings.getSettings).initiatives, saved);
+-      yield* settings.updateSettings({ kpExperienceEnabled: true });
++      yield* settings.updateSettings({ initiativeManagementEnabled: true });
+       yield* settings.updateSettings({
+         initiativeChange: {
+           action: "create",
+@@ -71,7 +71,7 @@ it.effect(
+ it.effect("reports a repairable display warning without rejecting an accepted launch", () =>
+   Effect.gen(function* () {
+     const settings = yield* ServerSettingsService;
+-    yield* settings.updateSettings({ kpExperienceEnabled: true });
++    yield* settings.updateSettings({ initiativeManagementEnabled: true });
+     const pm = ThreadId.make("pm");
+     yield* settings.updateSettings({
+       initiativeChange: {
+diff --git a/apps/server/src/initiatives.ts b/apps/server/src/initiatives.ts
+index 0cb0a7f8d5..3d05752b85 100644
+--- a/apps/server/src/initiatives.ts
++++ b/apps/server/src/initiatives.ts
+@@ -12,7 +12,7 @@ export const inheritInitiative = Effect.fn("initiatives.inherit")(function* (
+ ) {
+   return yield* Effect.gen(function* () {
+     const current = yield* settings.getSettings;
+-    if (!current.kpExperienceEnabled) return {};
++    if (!current.initiativeManagementEnabled) return {};
+     const existingId = initiativeForThread(current.initiatives, threadId);
+     if (existingId !== undefined) return { initiativeId: existingId };
+     if (options.isReplay === true) return {};
+@@ -21,7 +21,7 @@ export const inheritInitiative = Effect.fn("initiatives.inherit")(function* (
+     const assigned = yield* settings.updateSettings({
+       initiativeChange: { action: "assign", id: initiativeId, threadId, onlyIfUngrouped: true },
+     });
+-    if (!assigned.kpExperienceEnabled) return {};
++    if (!assigned.initiativeManagementEnabled) return {};
+     const assignedId = initiativeForThread(assigned.initiatives, threadId);
+     if (assignedId === undefined)
+       return yield* new OrchestratorMcpFailure({
+diff --git a/apps/server/src/mcp/OrchestratorMcpService.test.ts b/apps/server/src/mcp/OrchestratorMcpService.test.ts
+index c2987e3ba7..aafade6b44 100644
+--- a/apps/server/src/mcp/OrchestratorMcpService.test.ts
++++ b/apps/server/src/mcp/OrchestratorMcpService.test.ts
+@@ -2098,7 +2098,7 @@ describe("OrchestratorMcpService provider resolution", () => {
+             { databaseLayer: layerDatabase, runEffectWorker: false },
+           );
+           const layerSettings = ServerSettings.layerTest({
+-            kpExperienceEnabled: true,
++            initiativeManagementEnabled: true,
+             initiatives: {
+               original: {
+                 name: "Original",
+diff --git a/apps/server/src/mcp/toolkits/initiatives.test.ts b/apps/server/src/mcp/toolkits/initiatives.test.ts
+index 17645c4d22..cbf29ce101 100644
+--- a/apps/server/src/mcp/toolkits/initiatives.test.ts
++++ b/apps/server/src/mcp/toolkits/initiatives.test.ts
+@@ -79,7 +79,7 @@ const create = () =>
+     },
+   });
+ 
+-const makeHarness = (kpExperienceEnabled = true) => {
++const makeHarness = (initiativeManagementEnabled = true) => {
+   const threads = new Map([
+     [coordinatorId, coordinator],
+     [memberId, member],
+@@ -87,7 +87,7 @@ const makeHarness = (kpExperienceEnabled = true) => {
+   const dispatch = vi.fn(() => Effect.succeed({ sequence: 1, storedEvents: [] }));
+   const layer = McpHttpServer.layerThreadToolkit.pipe(
+     Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
+-    Layer.provideMerge(ServerSettings.layerTest({ kpExperienceEnabled })),
++    Layer.provideMerge(ServerSettings.layerTest({ initiativeManagementEnabled })),
+     Layer.provide(NodeCrypto.layer),
+     Layer.provide(Layer.mock(ThreadSearch.ThreadSearch)({})),
+     Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
+@@ -199,32 +199,35 @@ it.effect("deletes only the initiative and preserves its sessions and lifecycle"
+   }).pipe(Effect.provide(layer));
+ });
+ 
+-it.effect("requires the KP Experience and keeps saved membership across off/on transitions", () => {
+-  const { layer } = makeHarness(false);
+-  return Effect.gen(function* () {
+-    const settings = yield* ServerSettings.ServerSettingsService;
+-    expect(declaredFailure(yield* call("t3_initiative_list"))).toMatchObject({
+-      code: "invalid_request",
+-    });
+-    expect(declaredFailure(yield* create())).toMatchObject({ code: "invalid_request" });
+-    expect((yield* settings.getSettings).initiatives).toEqual({});
+-    yield* settings.updateSettings({ kpExperienceEnabled: true });
+-    const created = yield* create();
+-    expect(created.isError).toBe(false);
+-    yield* settings.updateSettings({ kpExperienceEnabled: false });
+-    expect(declaredFailure(yield* call("t3_initiative_list"))).toMatchObject({
+-      code: "invalid_request",
+-    });
+-    expect(
+-      declaredFailure(
+-        yield* call("t3_initiative_update", {
+-          change: { action: "delete", id: "routing" },
+-        }),
+-      ),
+-    ).toMatchObject({ code: "invalid_request" });
+-    yield* settings.updateSettings({ kpExperienceEnabled: true });
+-    expect((yield* call("t3_initiative_list")).structuredContent).toEqual(
+-      created.structuredContent,
+-    );
+-  }).pipe(Effect.provide(layer));
+-});
++it.effect(
++  "requires initiative management and keeps saved membership across off/on transitions",
++  () => {
++    const { layer } = makeHarness(false);
++    return Effect.gen(function* () {
++      const settings = yield* ServerSettings.ServerSettingsService;
++      expect(declaredFailure(yield* call("t3_initiative_list"))).toMatchObject({
++        code: "invalid_request",
++      });
++      expect(declaredFailure(yield* create())).toMatchObject({ code: "invalid_request" });
++      expect((yield* settings.getSettings).initiatives).toEqual({});
++      yield* settings.updateSettings({ initiativeManagementEnabled: true });
++      const created = yield* create();
++      expect(created.isError).toBe(false);
++      yield* settings.updateSettings({ initiativeManagementEnabled: false });
++      expect(declaredFailure(yield* call("t3_initiative_list"))).toMatchObject({
++        code: "invalid_request",
++      });
++      expect(
++        declaredFailure(
++          yield* call("t3_initiative_update", {
++            change: { action: "delete", id: "routing" },
++          }),
++        ),
++      ).toMatchObject({ code: "invalid_request" });
++      yield* settings.updateSettings({ initiativeManagementEnabled: true });
++      expect((yield* call("t3_initiative_list")).structuredContent).toEqual(
++        created.structuredContent,
++      );
++    }).pipe(Effect.provide(layer));
++  },
++);
+diff --git a/apps/server/src/mcp/toolkits/project/handlers.test.ts b/apps/server/src/mcp/toolkits/project/handlers.test.ts
+index 9990c6ea0d..772a8df368 100644
+--- a/apps/server/src/mcp/toolkits/project/handlers.test.ts
++++ b/apps/server/src/mcp/toolkits/project/handlers.test.ts
+@@ -356,7 +356,7 @@ it.effect("a launch retried with the same clientRequestId replays the first one"
+     });
+     yield* Effect.gen(function* () {
+       const settings = yield* ServerSettings.ServerSettingsService;
+-      yield* settings.updateSettings({ kpExperienceEnabled: true });
++      yield* settings.updateSettings({ initiativeManagementEnabled: true });
+       yield* settings.updateSettings({
+         initiativeChange: {
+           action: "create",
+diff --git a/apps/server/src/mcp/toolkits/thread/handlers.ts b/apps/server/src/mcp/toolkits/thread/handlers.ts
+index 4e8ff8fcc1..ba7b1ca94d 100644
+--- a/apps/server/src/mcp/toolkits/thread/handlers.ts
++++ b/apps/server/src/mcp/toolkits/thread/handlers.ts
+@@ -94,10 +94,10 @@ const writesThread = <P extends { readonly threadId?: ThreadId | undefined }, A,
+ const readInitiativeSettings = Effect.fn("mcp.readInitiativeSettings")(function* () {
+   const service = yield* ServerSettingsService;
+   const settings = yield* service.getSettings.pipe(Effect.mapError(unavailable));
+-  if (!settings.kpExperienceEnabled)
++  if (!settings.initiativeManagementEnabled)
+     return yield* new OrchestratorMcpFailure({
+       code: "invalid_request",
+-      message: "Enable the KP Experience in Settings → Labs to manage initiatives.",
++      message: "Enable initiative management in Settings → Labs → The KP Experience.",
+     });
+   return settings;
+ });
+diff --git a/apps/server/src/serverSettings.test.ts b/apps/server/src/serverSettings.test.ts
+index e450ed8dd7..41d3066981 100644
+--- a/apps/server/src/serverSettings.test.ts
++++ b/apps/server/src/serverSettings.test.ts
+@@ -152,7 +152,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+         config.settingsPath,
+         JSON.stringify({
+           projectSettingsFolded: true,
+-          kpExperienceEnabled: true,
++          initiativeManagementEnabled: true,
+           responseStreamingMode: "turn",
+           initiatives: groups,
+         }),
+@@ -178,12 +178,14 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+       assert.equal(yield* fs.readFileString(config.settingsPath), settingsFile);
+       assert.deepEqual(JSON.parse(yield* fs.readFileString(initiativesPath)).routing, saved);
+       const membershipFile = yield* fs.readFileString(initiativesPath);
+-      yield* service.updateSettings({ kpExperienceEnabled: true });
+-      assert.isTrue(JSON.parse(yield* fs.readFileString(config.settingsPath)).kpExperienceEnabled);
+-      yield* service.updateSettings({ kpExperienceEnabled: false });
++      yield* service.updateSettings({ initiativeManagementEnabled: true });
++      assert.isTrue(
++        JSON.parse(yield* fs.readFileString(config.settingsPath)).initiativeManagementEnabled,
++      );
++      yield* service.updateSettings({ initiativeManagementEnabled: false });
+       assert.isFalse(
+         (yield* decodeServerSettingsJson(yield* fs.readFileString(config.settingsPath)))
+-          .kpExperienceEnabled,
++          .initiativeManagementEnabled,
+       );
+       const blocked = yield* Effect.flip(
+         service.updateSettings({ initiativeChange: { action: "delete", id: "routing" } }),
+@@ -323,7 +325,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+       const service = yield* ServerSettingsModule.ServerSettingsService;
+       const initiativesPath = path.join(path.dirname(config.settingsPath), "initiatives.json");
+       const original =
+-        '{"kpExperienceEnabled":true,"projectSettingsFolded":true,"responseStreamingMode":"turn"}';
++        '{"initiativeManagementEnabled":true,"projectSettingsFolded":true,"responseStreamingMode":"turn"}';
+       const groups = { old: { name: "Old", coordinatorThreadId: null, memberThreadIds: [] } };
+       yield* fs.writeFileString(config.settingsPath, original);
+       yield* fs.writeFileString(initiativesPath, JSON.stringify(groups));
+diff --git a/apps/server/src/serverSettings.ts b/apps/server/src/serverSettings.ts
+index d2e20de2a6..36f9e00442 100644
+--- a/apps/server/src/serverSettings.ts
++++ b/apps/server/src/serverSettings.ts
+@@ -208,7 +208,7 @@ function ensureInitiativeWritesAllowed(
+   settingsPath: string,
+ ) {
+   return patch.initiativeChange !== undefined &&
+-    (patch.kpExperienceEnabled ?? current.kpExperienceEnabled) !== true
++    (patch.initiativeManagementEnabled ?? current.initiativeManagementEnabled) !== true
+     ? Effect.fail(new ServerSettingsError({ settingsPath, operation: "initiative-disabled" }))
+     : Effect.void;
+ }
+diff --git a/apps/server/src/ws.ts b/apps/server/src/ws.ts
+index 004089c539..b38190083c 100644
+--- a/apps/server/src/ws.ts
++++ b/apps/server/src/ws.ts
+@@ -1975,8 +1975,8 @@ export const layerWsRpc = (
+             : { managedPolicy: serverSettings.managedPolicy }),
+           shellResumeCompletionMarker: true,
+           shellThreadFamilies: true,
+-          initiativeGroups: settings.kpExperienceEnabled,
+-          kpExperienceSettings: true,
++          initiativeGroups: settings.initiativeManagementEnabled,
++          initiativeManagementSettings: true,
+           threadLinkMetadata: true,
+           shellOlderSettled: true,
+           threadResumeCompletionMarker: true,
 diff --git a/apps/web/src/components/InitiativeSidebar.browser.test.tsx b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
-index d2ded2d729..2a6849ece5 100644
+index d2ded2d729..0e1be6b89e 100644
 --- a/apps/web/src/components/InitiativeSidebar.browser.test.tsx
 +++ b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
 @@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
@@ -15,8 +286,8 @@ index d2ded2d729..2a6849ece5 100644
          serverConfig: {
            initiativeGroups: state.supported,
 -          settings: { initiatives: state.initiatives },
-+          kpExperienceSettings: true,
-+          settings: { initiatives: state.initiatives, kpExperienceEnabled: state.enabled },
++          initiativeManagementSettings: true,
++          settings: { initiatives: state.initiatives, initiativeManagementEnabled: state.enabled },
          },
        },
      ],
@@ -29,20 +300,23 @@ index d2ded2d729..2a6849ece5 100644
        <li>
          <button
            onClick={() =>
-@@ -98,7 +100,11 @@ const view = () => (
+@@ -98,7 +100,14 @@ const view = () => (
            new Map([
              [
                environmentId,
 -              { initiativeGroups: state.supported, settings: { initiatives: state.initiatives } },
 +              {
 +                initiativeGroups: state.supported,
-+                kpExperienceSettings: true,
-+                settings: { initiatives: state.initiatives, kpExperienceEnabled: state.enabled },
++                initiativeManagementSettings: true,
++                settings: {
++                  initiatives: state.initiatives,
++                  initiativeManagementEnabled: state.enabled,
++                },
 +              },
              ],
            ]),
            null,
-@@ -113,6 +119,7 @@ const view = () => (
+@@ -113,6 +122,7 @@ const view = () => (
  );
  function setup() {
    state.supported = true;
@@ -50,7 +324,7 @@ index d2ded2d729..2a6849ece5 100644
    state.changes = [];
    state.holdSaves = false;
    state.failNextSave = false;
-@@ -169,9 +176,10 @@ it("creates a named group with an explicit PM and settled worker without lifecyc
+@@ -169,9 +179,10 @@ it("creates a named group with an explicit PM and settled worker without lifecyc
      "coordinator",
    ]);
  });
@@ -64,16 +338,16 @@ index d2ded2d729..2a6849ece5 100644
    await expect
      .element(screen.getByRole("button", { name: "New initiative" }))
 diff --git a/apps/web/src/components/InitiativeSidebar.logic.test.ts b/apps/web/src/components/InitiativeSidebar.logic.test.ts
-index 14a6e3345b..54af32ebdf 100644
+index 14a6e3345b..b3ad891686 100644
 --- a/apps/web/src/components/InitiativeSidebar.logic.test.ts
 +++ b/apps/web/src/components/InitiativeSidebar.logic.test.ts
 @@ -53,7 +53,9 @@ it("uses grouped order and scope for ranges while excluding collapsed and unrela
        environmentId,
        {
          initiativeGroups: true,
-+        kpExperienceSettings: true,
++        initiativeManagementSettings: true,
          settings: {
-+          kpExperienceEnabled: true,
++          initiativeManagementEnabled: true,
            initiatives: {
              routing: { name: "Routing", coordinatorThreadId: a.id, memberThreadIds: [a.id, b.id] },
              other: { name: "Other", coordinatorThreadId: null, memberThreadIds: [hidden.id] },
@@ -84,7 +358,7 @@ index 14a6e3345b..54af32ebdf 100644
 +  const disabledConfigs = new Map(
 +    [...configs].map(([environmentId, config]) => [
 +      environmentId,
-+      { ...config, settings: { ...config.settings, kpExperienceEnabled: false } },
++      { ...config, settings: { ...config.settings, initiativeManagementEnabled: false } },
 +    ]),
 +  );
 +  const disabled = initiativeLayout([a, unrelated, b, hidden], disabledConfigs, null, []);
@@ -93,7 +367,7 @@ index 14a6e3345b..54af32ebdf 100644
 +  expect(disabled.memberThreads).toEqual([]);
 +  const legacyConfigs = new Map(
 +    [...disabledConfigs].map(
-+      ([environmentId, { kpExperienceSettings: _capability, ...config }]) => [
++      ([environmentId, { initiativeManagementSettings: _capability, ...config }]) => [
 +        environmentId,
 +        config,
 +      ],
@@ -106,7 +380,7 @@ index 14a6e3345b..54af32ebdf 100644
    expect(scoped.visibleThreads.map((thread) => thread.id)).toEqual([]);
    expect(scoped.groups[0]?.settledThreadIds).toEqual([b.id]);
 diff --git a/apps/web/src/components/InitiativeSidebar.logic.ts b/apps/web/src/components/InitiativeSidebar.logic.ts
-index a7949e0ce1..e82379c494 100644
+index a7949e0ce1..972c18661d 100644
 --- a/apps/web/src/components/InitiativeSidebar.logic.ts
 +++ b/apps/web/src/components/InitiativeSidebar.logic.ts
 @@ -1,5 +1,6 @@
@@ -123,8 +397,8 @@ index a7949e0ce1..e82379c494 100644
 -    { initiativeGroups?: boolean; settings: { initiatives?: Initiatives } }
 +    {
 +      initiativeGroups?: boolean;
-+      kpExperienceSettings?: boolean;
-+      settings: { initiatives?: Initiatives; kpExperienceEnabled?: boolean };
++      initiativeManagementSettings?: boolean;
++      settings: { initiatives?: Initiatives; initiativeManagementEnabled?: boolean };
 +    }
    >,
    scopedProjectKeys: ReadonlySet<string> | null,
@@ -139,7 +413,7 @@ index a7949e0ce1..e82379c494 100644
        const allIds = initiativeMembers(group);
        for (const threadId of allIds) keys.add(`${environmentId}:${threadId}`);
 diff --git a/apps/web/src/components/InitiativeSidebar.tsx b/apps/web/src/components/InitiativeSidebar.tsx
-index 89f476d56e..72d736145b 100644
+index 89f476d56e..ba633aed41 100644
 --- a/apps/web/src/components/InitiativeSidebar.tsx
 +++ b/apps/web/src/components/InitiativeSidebar.tsx
 @@ -1,3 +1,4 @@
@@ -182,7 +456,7 @@ index 89f476d56e..72d736145b 100644
 +        environment.environmentId === editing.environmentId &&
 +        initiativeGroupsEnabled(environment.serverConfig),
 +    );
-+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- dismisses stale editor state when its environment disables the KP Experience externally
++  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- dismisses stale editor state when its environment disables initiative management externally
 +  useEffect(() => {
 +    if (editing !== null && !enabled) closeInitiativeEditor();
 +  }, [editing, enabled]);
@@ -191,7 +465,7 @@ index 89f476d56e..72d736145b 100644
        key={`${editing.environmentId}:${editing.id}`}
        target={editing}
 diff --git a/apps/web/src/components/NewInitiativeThreadDialog.tsx b/apps/web/src/components/NewInitiativeThreadDialog.tsx
-index e4f0536f47..29e9c5355d 100644
+index e4f0536f47..a5d95903b1 100644
 --- a/apps/web/src/components/NewInitiativeThreadDialog.tsx
 +++ b/apps/web/src/components/NewInitiativeThreadDialog.tsx
 @@ -1,3 +1,4 @@
@@ -240,7 +514,7 @@ index e4f0536f47..29e9c5355d 100644
 +      environment.environmentId === target.environmentId &&
 +      initiativeGroupsEnabled(environment.serverConfig),
 +  );
-+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- closes the dialog when its environment disables the KP Experience externally
++  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- closes the dialog when its environment disables initiative management externally
 +  useEffect(() => {
 +    if (!enabled) onClose();
 +  }, [enabled, onClose]);
@@ -307,7 +581,7 @@ index e4f0536f47..29e9c5355d 100644
      <Dialog
        open
 diff --git a/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx b/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
-index c1f6ef814c..fdaccc2e51 100644
+index c1f6ef814c..794f369462 100644
 --- a/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
 +++ b/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
 @@ -18,9 +18,12 @@ import {
@@ -328,7 +602,7 @@ index c1f6ef814c..fdaccc2e51 100644
      acceptSettingsUpdates: true,
      settingsUpdateFailures: 1,
      settings: {
-+      kpExperienceEnabled: true,
++      initiativeManagementEnabled: true,
        defaultThreadEnvMode: "worktree",
        initiatives: {
          routing: { name: "Routing", coordinatorThreadId: pm.id, memberThreadIds: [pm.id] },
@@ -337,7 +611,7 @@ index c1f6ef814c..fdaccc2e51 100644
    expect(JSON.parse(localStorage.getItem("t3code:initiatives:collapsed")!)).toEqual([]);
  });
 +
-+it("does not resume dismissed creation when the KP Experience is enabled again", async () => {
++it("does not resume dismissed creation when initiative management is enabled again", async () => {
 +  settings();
 +  const pm = threadWithHistory("cancelled-creation-pm", 1);
 +  using _environment = installFakeEnvironment([pm], {
@@ -346,7 +620,7 @@ index c1f6ef814c..fdaccc2e51 100644
 +    holdThreadCreation: true,
 +    acceptSettingsUpdates: true,
 +    settings: {
-+      kpExperienceEnabled: true,
++      initiativeManagementEnabled: true,
 +      initiatives: {
 +        routing: { name: "Routing", coordinatorThreadId: pm.id, memberThreadIds: [pm.id] },
 +      },
@@ -366,28 +640,28 @@ index c1f6ef814c..fdaccc2e51 100644
 +      1,
 +    ),
 +  );
-+  await act(() => emitServerSettings({ kpExperienceEnabled: false }));
++  await act(() => emitServerSettings({ initiativeManagementEnabled: false }));
 +  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
-+  await act(() => emitServerSettings({ kpExperienceEnabled: true }));
++  await act(() => emitServerSettings({ initiativeManagementEnabled: true }));
 +  await act(releaseThreadCreation);
 +  expect(savedServerSettings().initiatives.routing?.memberThreadIds).toEqual([pm.id]);
 +  expect(serverSettingsWrites().some((patch) => patch.initiativeChange !== undefined)).toBe(false);
 +  expect(router.state.location.pathname).toBe(`/${ENVIRONMENT_ID}/${pm.id}`);
 +});
 diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
-index 1d9cf04a14..fc8c697d11 100644
+index 1d9cf04a14..ed929629ef 100644
 --- a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 +++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 @@ -96,6 +96,7 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
        project(foreign.projectId, "foreign-repository"),
      ],
      settings: {
-+      kpExperienceEnabled: true,
++      initiativeManagementEnabled: true,
        initiatives: {
          routing: {
            name: "Routing",
 diff --git a/apps/web/src/components/settings/LabsSettingsPanel.tsx b/apps/web/src/components/settings/LabsSettingsPanel.tsx
-index 38be7d6115..8a9bdd4801 100644
+index 38be7d6115..56aeb8a3a7 100644
 --- a/apps/web/src/components/settings/LabsSettingsPanel.tsx
 +++ b/apps/web/src/components/settings/LabsSettingsPanel.tsx
 @@ -17,6 +17,7 @@ import { firstManagedDenial, usePrimaryManagedPolicy } from "~/state/managedPoli
@@ -398,7 +672,7 @@ index 38be7d6115..8a9bdd4801 100644
        <SettingsSection id="beta" title="Beta">
          <BoringSidebarRow />
          {/* Clerk is only mounted when this build has T3 Connect. */}
-@@ -30,6 +31,40 @@ export function LabsSettingsPanel() {
+@@ -30,6 +31,42 @@ export function LabsSettingsPanel() {
    );
  }
  
@@ -407,7 +681,7 @@ index 38be7d6115..8a9bdd4801 100644
 +  const settings = useScopedSettings();
 +  const updateSettings = useUpdateScopedSettings();
 +  const supported = connectedEnvironments.filter(
-+    (environment) => environment.serverConfig?.kpExperienceSettings === true,
++    (environment) => environment.serverConfig?.initiativeManagementSettings === true,
 +  );
 +  if (scope.kind === "project" || scope.kind === "checkout" || supported.length === 0) return null;
 +  const allSupported = supported.length === connectedEnvironments.length;
@@ -415,8 +689,8 @@ index 38be7d6115..8a9bdd4801 100644
 +    <SettingsSection id="kp-experience" title="The KP Experience">
 +      <SettingsRow
 +        serverScoped
-+        {...searchableSetting("kp-experience")}
-+        settingKeys={["kpExperienceEnabled"]}
++        {...searchableSetting("initiative-management")}
++        settingKeys={["initiativeManagementEnabled"]}
 +        description={
 +          allSupported
 +            ? "Group sessions into initiatives with a PM, status summaries, and a Settled section. Agent-launched sessions inherit their caller’s group. Turning this off keeps saved groups and sessions."
@@ -424,11 +698,13 @@ index 38be7d6115..8a9bdd4801 100644
 +        }
 +        control={
 +          <ScopedSwitch
-+            settingKeys={["kpExperienceEnabled"]}
-+            checked={settings.kpExperienceEnabled}
++            settingKeys={["initiativeManagementEnabled"]}
++            checked={settings.initiativeManagementEnabled}
 +            disabled={!allSupported}
-+            onCheckedChange={(checked) => updateSettings({ kpExperienceEnabled: Boolean(checked) })}
-+            aria-label="Enable the KP Experience"
++            onCheckedChange={(checked) =>
++              updateSettings({ initiativeManagementEnabled: Boolean(checked) })
++            }
++            aria-label="Enable initiative management"
 +          />
 +        }
 +      />
@@ -440,7 +716,7 @@ index 38be7d6115..8a9bdd4801 100644
    const settings = useScopedSettings();
    const updateSettings = useUpdateScopedSettings();
 diff --git a/apps/web/src/components/settings/settingsSearch.ts b/apps/web/src/components/settings/settingsSearch.ts
-index 4f61ba41c0..d56b437dbd 100644
+index 4f61ba41c0..dcd38440b6 100644
 --- a/apps/web/src/components/settings/settingsSearch.ts
 +++ b/apps/web/src/components/settings/settingsSearch.ts
 @@ -461,6 +461,12 @@ export const SETTINGS_SEARCH_ITEMS = [
@@ -448,8 +724,8 @@ index 4f61ba41c0..d56b437dbd 100644
      searchTerms: ["hide fold running monitoring threads inbox sidebar shelf"],
    },
 +  {
-+    id: "kp-experience",
-+    title: "Enable the KP Experience",
++    id: "initiative-management",
++    title: "Enable initiative management",
 +    to: "/settings/labs",
 +    searchTerms: ["kp initiatives grouping project manager settled sessions"],
 +  },
@@ -478,7 +754,7 @@ index 4cc9efda7e..58c90410de 100644
      ? config
      : null;
 diff --git a/apps/web/test/fakeEnvironment.ts b/apps/web/test/fakeEnvironment.ts
-index a3571e5cb2..835aee898a 100644
+index a3571e5cb2..2a9f8421aa 100644
 --- a/apps/web/test/fakeEnvironment.ts
 +++ b/apps/web/test/fakeEnvironment.ts
 @@ -43,6 +43,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
@@ -531,7 +807,7 @@ index a3571e5cb2..835aee898a 100644
 -      : { initiativeGroups: options.initiativeGroups }),
 +      : {
 +          initiativeGroups: options.initiativeGroups,
-+          kpExperienceSettings: options.initiativeGroups,
++          initiativeManagementSettings: options.initiativeGroups,
 +        }),
    };
    dispatched = [];
@@ -568,26 +844,86 @@ index a3571e5cb2..835aee898a 100644
  export function serverSettingsWrites(): ReadonlyArray<ServerSettingsPatch> {
    return settingsWrites;
  }
+diff --git a/packages/contracts/src/server.ts b/packages/contracts/src/server.ts
+index 1879288bba..809b91ac42 100644
+--- a/packages/contracts/src/server.ts
++++ b/packages/contracts/src/server.ts
+@@ -631,7 +631,7 @@ export const ServerConfig = Schema.Struct({
+   shellThreadFamilies: Schema.optionalKey(Schema.Boolean),
+   /** Persistent initiative display groups and native grouping tools. */
+   initiativeGroups: Schema.optionalKey(Schema.Boolean),
+-  kpExperienceSettings: Schema.optionalKey(Schema.Boolean),
++  initiativeManagementSettings: Schema.optionalKey(Schema.Boolean),
+   threadLinkMetadata: Schema.optionalKey(Schema.Boolean),
+   /**
+    * The shell can leave older settled threads out of snapshots (`omitOlderSettled`), and
+diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
+index 9495c8d20d..609d377072 100644
+--- a/packages/contracts/src/settings.ts
++++ b/packages/contracts/src/settings.ts
+@@ -1377,7 +1377,9 @@ export const InitiativeChange = Schema.Union([
+ export type InitiativeChange = typeof InitiativeChange.Type;
+ 
+ export const ServerSettings = Schema.Struct({
+-  kpExperienceEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
++  initiativeManagementEnabled: Schema.Boolean.pipe(
++    Schema.withDecodingDefault(Effect.succeed(false)),
++  ),
+   initiatives: Initiatives.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
+   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+@@ -1767,7 +1769,7 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
+ ) {
+   override get message(): string {
+     if (this.operation === "initiative-disabled")
+-      return "Enable the KP Experience in Settings → Labs to manage initiatives.";
++      return "Enable initiative management in Settings → Labs → The KP Experience.";
+     if (this.operation === "write-managed-setting") {
+       return `${this.managedSetting ?? "This setting"} is managed by ${this.managedBy ?? "your organization"} and cannot be changed.`;
+     }
+@@ -1850,7 +1852,7 @@ export const ServerSettingsPatch = Schema.Struct({
+     }),
+   ),
+   worktreesDirectory: Schema.optionalKey(TrimmedString),
+-  kpExperienceEnabled: Schema.optionalKey(Schema.Boolean),
++  initiativeManagementEnabled: Schema.optionalKey(Schema.Boolean),
+   fastWorktreeCheckout: Schema.optionalKey(Schema.Boolean),
+   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
+   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
+diff --git a/packages/shared/src/initiatives.test.ts b/packages/shared/src/initiatives.test.ts
+index b8f33ddc70..36a71e1c5f 100644
+--- a/packages/shared/src/initiatives.test.ts
++++ b/packages/shared/src/initiatives.test.ts
+@@ -14,7 +14,7 @@ describe("initiative relationships", () => {
+   it("creates a coordinator once and keeps independent additions under serialized settings patches", () => {
+     let settings = {
+       ...DEFAULT_SERVER_SETTINGS,
+-      kpExperienceEnabled: true,
++      initiativeManagementEnabled: true,
+       initiatives: initial(),
+     };
+     for (const threadId of [api, ui, api])
 diff --git a/packages/shared/src/initiatives.ts b/packages/shared/src/initiatives.ts
-index eb2e5018b7..d39c8d3300 100644
+index eb2e5018b7..fa36e120b2 100644
 --- a/packages/shared/src/initiatives.ts
 +++ b/packages/shared/src/initiatives.ts
-@@ -1,5 +1,21 @@
+@@ -1,5 +1,22 @@
  import type { InitiativeChange, Initiatives, ThreadId } from "@t3tools/contracts";
  
 +export function initiativeGroupsEnabled(
 +  config:
 +    | {
 +        readonly initiativeGroups?: boolean;
-+        readonly kpExperienceSettings?: boolean;
-+        readonly settings: { readonly kpExperienceEnabled?: boolean };
++        readonly initiativeManagementSettings?: boolean;
++        readonly settings: { readonly initiativeManagementEnabled?: boolean };
 +      }
 +    | null
 +    | undefined,
 +): boolean {
 +  return (
 +    config?.initiativeGroups === true &&
-+    (config.kpExperienceSettings !== true || config.settings.kpExperienceEnabled === true)
++    (config.initiativeManagementSettings !== true ||
++      config.settings.initiativeManagementEnabled === true)
 +  );
 +}
 +
@@ -596,7 +932,7 @@ index eb2e5018b7..d39c8d3300 100644
    threadId: ThreadId,
 diff --git a/scripts/scenarios/kp-experience.e2e.ts b/scripts/scenarios/kp-experience.e2e.ts
 new file mode 100644
-index 0000000000..26aec3e934
+index 0000000000..98015a4532
 --- /dev/null
 +++ b/scripts/scenarios/kp-experience.e2e.ts
 @@ -0,0 +1,68 @@
@@ -605,7 +941,7 @@ index 0000000000..26aec3e934
 +import { test, WEB } from "./t3.ts";
 +
 +test(
-+  "The KP Experience preserves saved initiatives while disabled",
++  "Initiative management preserves saved initiatives while disabled",
 +  WEB,
 +  async ({ t3, app, screen, browser }) => {
 +    const project = await t3.project("kp-experience");
@@ -614,7 +950,7 @@ index 0000000000..26aec3e934
 +    await t3.open();
 +    await expect(screen.getByRole("button", "New initiative", { exact: true })).toBeVisible();
 +    await app.open("/settings/labs");
-+    const toggle = screen.getByRole("switch", "Enable the KP Experience", { exact: true });
++    const toggle = screen.getByRole("switch", "Enable initiative management", { exact: true });
 +    await expect(toggle).toBeChecked();
 +    await toggle.tap();
 +    await expect(toggle).not.toBeChecked();
@@ -668,3 +1004,16 @@ index 0000000000..26aec3e934
 +    await app.screenshot("kp-initiatives-restored");
 +  },
 +);
+diff --git a/scripts/scenarios/start-app.ts b/scripts/scenarios/start-app.ts
+index ef35b5dc93..179e2496f2 100644
+--- a/scripts/scenarios/start-app.ts
++++ b/scripts/scenarios/start-app.ts
+@@ -69,7 +69,7 @@ const prepareHome = Effect.fn("startApp.prepareHome")(function* (home: string) {
+   yield* fs.writeFileString(
+     path.join(home, "userdata/settings.json"),
+     yield* encodeSettings({
+-      kpExperienceEnabled: true,
++      initiativeManagementEnabled: true,
+       defaultModelSelection: REPLAY,
+       providerInstances: Object.fromEntries(
+         REAL_PROVIDERS.map((driver) => [
