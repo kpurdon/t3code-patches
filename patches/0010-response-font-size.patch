@@ -1,0 +1,777 @@
+diff --git a/apps/desktop/src/settings/DesktopClientSettings.test.ts b/apps/desktop/src/settings/DesktopClientSettings.test.ts
+index 1ab9b3159e..8f2f1b8080 100644
+--- a/apps/desktop/src/settings/DesktopClientSettings.test.ts
++++ b/apps/desktop/src/settings/DesktopClientSettings.test.ts
+@@ -45,6 +45,8 @@ const clientSettings: ClientSettings = {
+   fontFamilyTerminal: "",
+   fontSizeCode: 13,
+   fontSizeInterface: 16,
++  responseFontSizeEnabled: true,
++  fontSizeResponse: 22,
+   fontSizePrompt: 14,
+   fontSizeTerminal: 12,
+   fontSmoothing: true,
+diff --git a/apps/web/src/appInit.tsx b/apps/web/src/appInit.tsx
+index 3be9175c4f..0cbfe76f1a 100644
+--- a/apps/web/src/appInit.tsx
++++ b/apps/web/src/appInit.tsx
+@@ -97,6 +97,8 @@ function startClientAppearance(): void {
+       previous.fontSizeInterface !== settings.fontSizeInterface ||
+       previous.fontSizePrompt !== settings.fontSizePrompt ||
+       previous.fontSizeCode !== settings.fontSizeCode ||
++      previous.fontSizeResponse !== settings.fontSizeResponse ||
++      previous.responseFontSizeEnabled !== settings.responseFontSizeEnabled ||
+       previous.fontSmoothing !== settings.fontSmoothing ||
+       previousSeparateFonts !== separateFonts
+     ) {
+@@ -107,6 +109,8 @@ function startClientAppearance(): void {
+         sizeInterface: settings.fontSizeInterface,
+         sizePrompt: settings.fontSizePrompt,
+         sizeCode: settings.fontSizeCode,
++        sizeResponse: settings.fontSizeResponse,
++        responseSizing: settings.responseFontSizeEnabled,
+         smoothing: settings.fontSmoothing,
+         separate: separateFonts,
+       });
+diff --git a/apps/web/src/appearanceFonts.browser.test.ts b/apps/web/src/appearanceFonts.browser.test.ts
+index 9bdc5c2ef9..e350807da5 100644
+--- a/apps/web/src/appearanceFonts.browser.test.ts
++++ b/apps/web/src/appearanceFonts.browser.test.ts
+@@ -36,6 +36,8 @@ describe("applyAppearanceFontVariables", () => {
+       sizeInterface: 20,
+       sizePrompt: 14,
+       sizeCode: 13,
++      sizeResponse: 14,
++      responseSizing: false,
+       smoothing: true,
+     };
+     try {
+@@ -53,3 +55,57 @@ describe("applyAppearanceFontVariables", () => {
+     }
+   });
+ });
++
++it("sizes only assistant prose and headings while preserving code, prompts and interface scaling", () => {
++  const root = document.documentElement;
++  const savedStyle = root.getAttribute("style");
++  const savedFlag = root.hasAttribute("data-response-font-sizing");
++  const host = document.createElement("div");
++  host.innerHTML =
++    '<div class="chat-markdown assistant-response-markdown text-sm leading-relaxed"><h1>Heading</h1><p>Answer <code>inline</code></p><ul><li>Item</li></ul><table><tbody><tr><td>Table text</td></tr></tbody></table><div class="chat-markdown-codeblock"><pre><code>const code = true;</code></pre></div></div><div class="chat-markdown user-message-markdown text-sm"><p>User message</p></div>';
++  document.body.append(host);
++  const size = (selector: string) => getComputedStyle(host.querySelector(selector)!).fontSize;
++  const preferences = {
++    sans: "",
++    code: "",
++    composer: "",
++    sizeInterface: 16,
++    sizePrompt: 14,
++    sizeCode: 13,
++    sizeResponse: 21,
++    responseSizing: false,
++    smoothing: true,
++    separate: true,
++  };
++  try {
++    applyAppearanceFontVariables(root, preferences);
++    expect(size(".assistant-response-markdown p")).toBe("14px");
++    applyAppearanceFontVariables(root, { ...preferences, responseSizing: true });
++    expect(size(".assistant-response-markdown p")).toBe("21px");
++    expect(size(".assistant-response-markdown li")).toBe("21px");
++    expect(size(".assistant-response-markdown td")).toBe("21px");
++    expect(size(".assistant-response-markdown h1")).toBe("30px");
++    expect(size(".assistant-response-markdown p code")).toBe("17.85px");
++    expect(size("pre code")).toBe("13px");
++    expect(getComputedStyle(host.querySelector("pre")!).marginBlock).toBe("0px");
++    expect(size(".user-message-markdown p")).toBe("14px");
++    expect(composerFontSize()).toBe("14px");
++    applyAppearanceFontVariables(root, { ...preferences, responseSizing: true, sizeInterface: 20 });
++    expect(size(".assistant-response-markdown p")).toBe("21px");
++    expect(size(".assistant-response-markdown h1")).toBe("30px");
++    expect(size(".user-message-markdown p")).toBe("17.5px");
++    applyAppearanceFontVariables(root, {
++      ...preferences,
++      responseSizing: false,
++      sizeInterface: 20,
++    });
++    expect(size(".assistant-response-markdown p")).toBe("17.5px");
++    expect(size(".assistant-response-markdown h1")).toBe("25px");
++    expect(root.style.getPropertyValue("--font-size-response")).toBe("");
++  } finally {
++    host.remove();
++    if (savedStyle === null) root.removeAttribute("style");
++    else root.setAttribute("style", savedStyle);
++    root.toggleAttribute("data-response-font-sizing", savedFlag);
++  }
++});
+diff --git a/apps/web/src/appearanceFonts.ts b/apps/web/src/appearanceFonts.ts
+index e7c2867cb2..99d18d6aa1 100644
+--- a/apps/web/src/appearanceFonts.ts
++++ b/apps/web/src/appearanceFonts.ts
+@@ -2,12 +2,15 @@ import {
+   DEFAULT_CODE_FONT_SIZE,
+   DEFAULT_INTERFACE_FONT_SIZE,
+   DEFAULT_PROMPT_FONT_SIZE,
++  DEFAULT_RESPONSE_FONT_SIZE,
+   MAX_CODE_FONT_SIZE,
+   MAX_INTERFACE_FONT_SIZE,
+   MAX_PROMPT_FONT_SIZE,
++  MAX_RESPONSE_FONT_SIZE,
+   MIN_CODE_FONT_SIZE,
+   MIN_INTERFACE_FONT_SIZE,
+   MIN_PROMPT_FONT_SIZE,
++  MIN_RESPONSE_FONT_SIZE,
+ } from "@t3tools/contracts";
+ 
+ export const DEFAULT_SANS_FONT_STACK =
+@@ -65,6 +68,8 @@ export interface AppearanceFontPreferences {
+   readonly sizeInterface: number;
+   readonly sizePrompt: number;
+   readonly sizeCode: number;
++  readonly sizeResponse: number;
++  readonly responseSizing: boolean;
+   readonly smoothing: boolean;
+   readonly separate: boolean;
+ }
+@@ -93,6 +98,15 @@ export function applyAppearanceFontVariables(
+     "--font-size-prompt",
+     preferences.separate ? `${clampPromptFontSize(preferences.sizePrompt)}px` : "var(--text-sm)",
+   );
++  root.toggleAttribute("data-response-font-sizing", preferences.responseSizing);
++  if (preferences.responseSizing) {
++    root.style.setProperty(
++      "--font-size-response",
++      `${clampFontSize(preferences.sizeResponse, MIN_RESPONSE_FONT_SIZE, MAX_RESPONSE_FONT_SIZE, DEFAULT_RESPONSE_FONT_SIZE)}px`,
++    );
++  } else {
++    root.style.removeProperty("--font-size-response");
++  }
+   const code = clampCodeFontSize(preferences.sizeCode);
+   root.style.setProperty("--font-size-code", `${code}px`);
+   root.style.setProperty("--diffs-font-size", `${code}px`);
+diff --git a/apps/web/src/components/chat/TimelineAssistantRows.tsx b/apps/web/src/components/chat/TimelineAssistantRows.tsx
+index 6756220a99..eab3990098 100644
+--- a/apps/web/src/components/chat/TimelineAssistantRows.tsx
++++ b/apps/web/src/components/chat/TimelineAssistantRows.tsx
+@@ -48,6 +48,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
+             listRef={ctx.listRef}
+           >
+             <ChatMarkdown
++              className="assistant-response-markdown"
+               text={messageText}
+               cwd={ctx.markdownCwd}
+               threadRef={ctx.threadRef ?? undefined}
+diff --git a/apps/web/src/components/settings/LabsSettingsPanel.tsx b/apps/web/src/components/settings/LabsSettingsPanel.tsx
+index 56aeb8a3a7..dd9ee7f28c 100644
+--- a/apps/web/src/components/settings/LabsSettingsPanel.tsx
++++ b/apps/web/src/components/settings/LabsSettingsPanel.tsx
+@@ -32,41 +32,62 @@ export function LabsSettingsPanel() {
+ }
+ 
+ function KpExperienceSection() {
+-  const { scope, connectedEnvironments } = useSettingsScope();
+   const settings = useScopedSettings();
+   const updateSettings = useUpdateScopedSettings();
+-  const supported = connectedEnvironments.filter(
+-    (environment) => environment.serverConfig?.initiativeManagementSettings === true,
+-  );
+-  if (scope.kind === "project" || scope.kind === "checkout" || supported.length === 0) return null;
+-  const allSupported = supported.length === connectedEnvironments.length;
+   return (
+     <SettingsSection id="kp-experience" title="The KP Experience">
+       <SettingsRow
+-        serverScoped
+-        {...searchableSetting("initiative-management")}
+-        settingKeys={["initiativeManagementEnabled"]}
+-        description={
+-          allSupported
+-            ? "Group sessions into initiatives with a PM, status summaries, and a Settled section. Agent-launched sessions inherit their caller’s group. Turning this off keeps saved groups and sessions."
+-            : "Select a compatible environment above to change this setting."
+-        }
++        {...searchableSetting("response-font-sizing")}
++        description="Show an AI response font size row in Appearance → Typography. Turning this off uses the Interface font size and keeps your chosen response size."
+         control={
+-          <ScopedSwitch
+-            settingKeys={["initiativeManagementEnabled"]}
+-            checked={settings.initiativeManagementEnabled}
+-            disabled={!allSupported}
++          <Switch
++            checked={settings.responseFontSizeEnabled}
+             onCheckedChange={(checked) =>
+-              updateSettings({ initiativeManagementEnabled: Boolean(checked) })
++              updateSettings({ responseFontSizeEnabled: Boolean(checked) })
+             }
+-            aria-label="Enable initiative management"
++            aria-label="Enable response font sizing"
+           />
+         }
+       />
++      <InitiativeManagementRow />
+     </SettingsSection>
+   );
+ }
+ 
++function InitiativeManagementRow() {
++  const { scope, connectedEnvironments } = useSettingsScope();
++  const settings = useScopedSettings();
++  const updateSettings = useUpdateScopedSettings();
++  const supported = connectedEnvironments.filter(
++    (environment) => environment.serverConfig?.initiativeManagementSettings === true,
++  );
++  if (scope.kind === "project" || scope.kind === "checkout" || supported.length === 0) return null;
++  const allSupported = supported.length === connectedEnvironments.length;
++  return (
++    <SettingsRow
++      serverScoped
++      {...searchableSetting("initiative-management")}
++      settingKeys={["initiativeManagementEnabled"]}
++      description={
++        allSupported
++          ? "Group sessions into initiatives with a PM, status summaries, and a Settled section. Agent-launched sessions inherit their caller’s group. Turning this off keeps saved groups and sessions."
++          : "Select a compatible environment above to change this setting."
++      }
++      control={
++        <ScopedSwitch
++          settingKeys={["initiativeManagementEnabled"]}
++          checked={settings.initiativeManagementEnabled}
++          disabled={!allSupported}
++          onCheckedChange={(checked) =>
++            updateSettings({ initiativeManagementEnabled: Boolean(checked) })
++          }
++          aria-label="Enable initiative management"
++        />
++      }
++    />
++  );
++}
++
+ function BoringSidebarRow() {
+   const settings = useScopedSettings();
+   const updateSettings = useUpdateScopedSettings();
+diff --git a/apps/web/src/components/settings/SettingsFontPreviews.tsx b/apps/web/src/components/settings/SettingsFontPreviews.tsx
+index b7d4d0c14d..5a6c753f98 100644
+--- a/apps/web/src/components/settings/SettingsFontPreviews.tsx
++++ b/apps/web/src/components/settings/SettingsFontPreviews.tsx
+@@ -1,3 +1,4 @@
++import ChatMarkdown from "../ChatMarkdown";
+ import type { ServerProviderSkill } from "@t3tools/contracts";
+ import { preloadPatchFile } from "@pierre/diffs/ssr";
+ import { useAtomValue } from "@effect/atom-react";
+@@ -244,3 +245,20 @@ export function TerminalFontPreview({ family, size }: { family: string; size: nu
+     />
+   );
+ }
++
++export function ResponseFontPreview() {
++  return (
++    <div
++      className="mt-3 rounded-lg border border-border px-4 py-3"
++      data-testid="response-font-preview"
++    >
++      <ChatMarkdown
++        className="assistant-response-markdown"
++        cwd={undefined}
++        text={
++          "### Read responses at your own pace\n\nMake assistant answers comfortable to read while keeping the rest of the interface compact.\n\n- Paragraphs, lists, and headings scale together.\n- Inline `code` follows the surrounding text.\n\n```ts\nconst codeKeepsItsOwnSize = true;\n```"
++        }
++      />
++    </div>
++  );
++}
+diff --git a/apps/web/src/components/settings/SettingsPanels.logic.ts b/apps/web/src/components/settings/SettingsPanels.logic.ts
+index 3901226e8b..3411c1ab30 100644
+--- a/apps/web/src/components/settings/SettingsPanels.logic.ts
++++ b/apps/web/src/components/settings/SettingsPanels.logic.ts
+@@ -79,6 +79,8 @@ type TypographySettings = Pick<
+   | "fontFamilyCode"
+   | "fontFamilyTerminal"
+   | "fontSizeInterface"
++  | "fontSizeResponse"
++  | "responseFontSizeEnabled"
+   | "fontSizePrompt"
+   | "fontSizeCode"
+   | "fontSizeTerminal"
+@@ -86,6 +88,10 @@ type TypographySettings = Pick<
+ 
+ export function getChangedTypographySettingLabels(settings: TypographySettings): string[] {
+   return [
++    ...(settings.responseFontSizeEnabled !== DEFAULT_UNIFIED_SETTINGS.responseFontSizeEnabled ||
++    settings.fontSizeResponse !== DEFAULT_UNIFIED_SETTINGS.fontSizeResponse
++      ? ["AI response font size"]
++      : []),
+     ...(settings.fontFamilySans !== DEFAULT_UNIFIED_SETTINGS.fontFamilySans ||
+     settings.fontSizeInterface !== DEFAULT_UNIFIED_SETTINGS.fontSizeInterface
+       ? ["Interface font"]
+diff --git a/apps/web/src/components/settings/SettingsPanels.tsx b/apps/web/src/components/settings/SettingsPanels.tsx
+index 3dc9566e89..e77948da2d 100644
+--- a/apps/web/src/components/settings/SettingsPanels.tsx
++++ b/apps/web/src/components/settings/SettingsPanels.tsx
+@@ -693,6 +693,8 @@ export function useSettingsRestore(onRestored?: () => void) {
+       fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
+       fontFamilyTerminal: DEFAULT_UNIFIED_SETTINGS.fontFamilyTerminal,
+       fontSizeInterface: DEFAULT_UNIFIED_SETTINGS.fontSizeInterface,
++      fontSizeResponse: DEFAULT_UNIFIED_SETTINGS.fontSizeResponse,
++      responseFontSizeEnabled: DEFAULT_UNIFIED_SETTINGS.responseFontSizeEnabled,
+       fontSizePrompt: DEFAULT_UNIFIED_SETTINGS.fontSizePrompt,
+       fontSizeCode: DEFAULT_UNIFIED_SETTINGS.fontSizeCode,
+       fontSizeTerminal: DEFAULT_UNIFIED_SETTINGS.fontSizeTerminal,
+diff --git a/apps/web/src/components/settings/TypographySettings.browser.test.tsx b/apps/web/src/components/settings/TypographySettings.browser.test.tsx
+index bf6f03b367..32f50f32cc 100644
+--- a/apps/web/src/components/settings/TypographySettings.browser.test.tsx
++++ b/apps/web/src/components/settings/TypographySettings.browser.test.tsx
+@@ -20,6 +20,7 @@ vi.mock(import("./SettingsFontPreviews"), () => ({
+   CodeFontPreview: () => <div />,
+   PromptFontPreview: () => <div />,
+   TerminalFontPreview: () => <div />,
++  ResponseFontPreview: () => <div />,
+ }));
+ vi.mock(import("./settingsLayout"), async (original) => ({
+   ...(await original()),
+diff --git a/apps/web/src/components/settings/TypographySettings.tsx b/apps/web/src/components/settings/TypographySettings.tsx
+index 0d65e5c498..9eec43bc8f 100644
+--- a/apps/web/src/components/settings/TypographySettings.tsx
++++ b/apps/web/src/components/settings/TypographySettings.tsx
+@@ -5,10 +5,12 @@ import {
+   MAX_CODE_FONT_SIZE,
+   MAX_INTERFACE_FONT_SIZE,
+   MAX_PROMPT_FONT_SIZE,
++  MAX_RESPONSE_FONT_SIZE,
+   MAX_TERMINAL_FONT_SIZE,
+   MIN_CODE_FONT_SIZE,
+   MIN_INTERFACE_FONT_SIZE,
+   MIN_PROMPT_FONT_SIZE,
++  MIN_RESPONSE_FONT_SIZE,
+   MIN_TERMINAL_FONT_SIZE,
+ } from "@t3tools/contracts/settings";
+ import * as Schema from "effect/Schema";
+@@ -27,7 +29,12 @@ import {
+   TYPOGRAPHY_ADVANCED_STORAGE_KEY,
+ } from "../../appearanceFonts";
+ import { AdvancedSettings } from "./AdvancedSettings";
+-import { CodeFontPreview, PromptFontPreview, TerminalFontPreview } from "./SettingsFontPreviews";
++import {
++  CodeFontPreview,
++  PromptFontPreview,
++  TerminalFontPreview,
++  ResponseFontPreview,
++} from "./SettingsFontPreviews";
+ import { discoverInstalledFonts, FontFamilyPicker, useFontEnumeration } from "./FontFamilyPicker";
+ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+ import { Switch } from "../ui/switch";
+@@ -96,6 +103,60 @@ function InterfaceFontRow({ preview }: { preview?: ReactNode }) {
+   );
+ }
+ 
++function ResponseFontSizeRow() {
++  const settings = useScopedSettings();
++  const updateSettings = useUpdateScopedSettings();
++  if (!settings.responseFontSizeEnabled) return null;
++  return (
++    <SettingsRow
++      {...searchableSetting("response-font-size")}
++      description="Assistant prose, lists, and headings. Code blocks keep the code font size."
++      resetAction={
++        settings.fontSizeResponse !== DEFAULT_UNIFIED_SETTINGS.fontSizeResponse ? (
++          <SettingResetButton
++            label="AI response font size"
++            onClick={() =>
++              updateSettings({ fontSizeResponse: DEFAULT_UNIFIED_SETTINGS.fontSizeResponse })
++            }
++          />
++        ) : null
++      }
++      control={
++        <Select
++          value={String(settings.fontSizeResponse)}
++          onValueChange={(value) => {
++            if (typeof value !== "string") return;
++            const size = Number(value);
++            if (
++              Number.isInteger(size) &&
++              size >= MIN_RESPONSE_FONT_SIZE &&
++              size <= MAX_RESPONSE_FONT_SIZE
++            ) {
++              updateSettings({ fontSizeResponse: size });
++            }
++          }}
++        >
++          <SelectTrigger size="sm" className="w-22" aria-label="AI response font size">
++            <SelectValue>{settings.fontSizeResponse} px</SelectValue>
++          </SelectTrigger>
++          <SelectPopup align="end" alignItemWithTrigger={false}>
++            {Array.from(
++              { length: MAX_RESPONSE_FONT_SIZE - MIN_RESPONSE_FONT_SIZE + 1 },
++              (_, index) => MIN_RESPONSE_FONT_SIZE + index,
++            ).map((size) => (
++              <SelectItem hideIndicator key={size} value={String(size)}>
++                {size} px
++              </SelectItem>
++            ))}
++          </SelectPopup>
++        </Select>
++      }
++    >
++      <ResponseFontPreview />
++    </SettingsRow>
++  );
++}
++
+ function PromptFontRow() {
+   const settings = useScopedSettings();
+   const updateSettings = useUpdateScopedSettings();
+@@ -346,6 +407,7 @@ export function TypographySection() {
+   return (
+     <SettingsSection id="typography" title="Typography">
+       {showAdvanced ? <FontSettingsGroup /> : <SimpleFontRows />}
++      <ResponseFontSizeRow />
+       <WordWrapRow />
+       <AdvancedSettings
+         targetIds={[searchableSetting("separate-fonts").id, searchableSetting("font-smoothing").id]}
+diff --git a/apps/web/src/components/settings/settingsSearch.test.ts b/apps/web/src/components/settings/settingsSearch.test.ts
+index c360265f81..5a997094bd 100644
+--- a/apps/web/src/components/settings/settingsSearch.test.ts
++++ b/apps/web/src/components/settings/settingsSearch.test.ts
+@@ -139,8 +139,21 @@ describe("searchSettings", () => {
+       "auto-settle-merged-threads",
+       "days-before-auto-settle",
+       "linked-environments",
++      "response-font-size",
+     ]);
+     expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
++    expect(available.some((item) => item.id === "response-font-sizing")).toBe(true);
++    expect(
++      filterAvailableSettingsSearchItems({
++        hasCloudPublicConfig: false,
++        hasEnvironment: false,
++        hasProviderSettingsEnvironment: false,
++        canManageLocalBackend: false,
++        isWslSettingsRowVisible: false,
++        hasThreadAutoSettlement: false,
++        hasResponseFontSizing: true,
++      }).some((item) => item.id === "response-font-size"),
++    ).toBe(true);
+   });
+ 
+   it("finds linked environments on a remote host without local maintenance access", () => {
+diff --git a/apps/web/src/components/settings/settingsSearch.ts b/apps/web/src/components/settings/settingsSearch.ts
+index dcd38440b6..87fff61260 100644
+--- a/apps/web/src/components/settings/settingsSearch.ts
++++ b/apps/web/src/components/settings/settingsSearch.ts
+@@ -73,6 +73,7 @@ export interface SettingsSearchItem {
+   readonly textGeneratorsOnly?: boolean;
+   readonly secondary?: boolean;
+   readonly requiresThreadAutoSettlement?: boolean;
++  readonly requiresResponseFontSizing?: boolean;
+ }
+ 
+ export interface SettingsSearchAvailability {
+@@ -83,6 +84,7 @@ export interface SettingsSearchAvailability {
+   readonly canManageLocalBackend: boolean;
+   readonly isWslSettingsRowVisible: boolean;
+   readonly hasThreadAutoSettlement: boolean;
++  readonly hasResponseFontSizing?: boolean;
+   readonly managedTunnelActive?: boolean;
+   readonly hasPeerLinkHost?: boolean;
+   readonly hasFastWorktreeCheckoutEnvironment?: boolean;
+@@ -381,6 +383,13 @@ export const SETTINGS_SEARCH_ITEMS = [
+     to: "/settings/appearance",
+     searchTerms: ["typography family size system sans"],
+   },
++  {
++    id: "response-font-size",
++    requiresResponseFontSizing: true,
++    title: "AI response font size",
++    to: "/settings/appearance",
++    searchTerms: ["typography assistant answer chat text markdown readability size"],
++  },
+   {
+     id: "prompt-font",
+     title: "Prompt font",
+@@ -461,6 +470,12 @@ export const SETTINGS_SEARCH_ITEMS = [
+     to: "/settings/general",
+     searchTerms: ["hide fold running monitoring threads inbox sidebar shelf"],
+   },
++  {
++    id: "response-font-sizing",
++    title: "Enable response font sizing",
++    to: "/settings/labs",
++    searchTerms: ["kp experience assistant ai answer chat text independent typography font size"],
++  },
+   {
+     id: "initiative-management",
+     title: "Enable initiative management",
+@@ -1486,6 +1501,7 @@ export function filterAvailableSettingsSearchItems(
+       (!item.primaryEnvironmentOnly || availability.hasPrimaryEnvironment === true) &&
+       (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
+       (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement) &&
++      (!item.requiresResponseFontSizing || availability.hasResponseFontSizing === true) &&
+       (!item.managedTunnelOnly || availability.managedTunnelActive === true) &&
+       (!item.peerLinksOnly || availability.hasPeerLinkHost === true) &&
+       (!item.fastWorktreeCheckoutOnly ||
+diff --git a/apps/web/src/components/settings/useAvailableSettingsSearchItems.ts b/apps/web/src/components/settings/useAvailableSettingsSearchItems.ts
+index 8dc0bce3a7..c2ef2b8dbe 100644
+--- a/apps/web/src/components/settings/useAvailableSettingsSearchItems.ts
++++ b/apps/web/src/components/settings/useAvailableSettingsSearchItems.ts
+@@ -1,3 +1,4 @@
++import { useClientSettings } from "~/hooks/useSettings";
+ import { AuthEnvironmentMaintainScope } from "@t3tools/contracts";
+ 
+ import { usePrimaryCloudLinkState } from "~/cloud/cloudLinkState";
+@@ -18,6 +19,7 @@ import {
+ 
+ export function useAvailableSettingsSearchItems() {
+   const { environments } = useEnvironments();
++  const hasResponseFontSizing = useClientSettings((settings) => settings.responseFontSizeEnabled);
+   // Explicit booleans keep flags out of the filter cache so environment updates do not rebuild the list.
+   const hasEnvironment =
+     environments.some((environment) => environment.serverConfig !== null) === true;
+@@ -61,6 +63,7 @@ export function useAvailableSettingsSearchItems() {
+     isWslSettingsRowVisible({ state: desktopWsl.data, error: desktopWsl.error }) === true;
+ 
+   return filterAvailableSettingsSearchItems({
++    hasResponseFontSizing,
+     localEnvironmentDisabled,
+     hasCloudPublicConfig: cloudPublicConfig,
+     hasEnvironment,
+diff --git a/apps/web/src/index.css b/apps/web/src/index.css
+index 40daa0da7d..c0164806e0 100644
+--- a/apps/web/src/index.css
++++ b/apps/web/src/index.css
+@@ -2592,3 +2592,57 @@ code {
+   outline: 2px solid var(--ring);
+   outline-offset: -2px;
+ }
++
++/* Response sizing is opt-in; code blocks retain --font-size-code. */
++html[data-response-font-sizing] .assistant-response-markdown {
++  font-size: var(--font-size-response);
++  --response-font-unit: calc(var(--font-size-response) / 14);
++}
++
++html[data-response-font-sizing] .assistant-response-markdown :is(h1, h2, h3, h4, h5, h6) {
++  margin-block: calc(var(--response-font-unit) * 20) calc(var(--response-font-unit) * 8);
++}
++
++html[data-response-font-sizing] .assistant-response-markdown h1 {
++  font-size: calc(var(--response-font-unit) * 20);
++}
++
++html[data-response-font-sizing] .assistant-response-markdown h2 {
++  font-size: calc(var(--response-font-unit) * 18);
++}
++
++html[data-response-font-sizing] .assistant-response-markdown h3 {
++  font-size: calc(var(--response-font-unit) * 16);
++}
++
++html[data-response-font-sizing] .assistant-response-markdown :is(h4, h5, h6) {
++  font-size: var(--font-size-response);
++}
++
++html[data-response-font-sizing]
++  .assistant-response-markdown
++  :is(p, ul, ol, blockquote, .chat-markdown-codeblock, .chat-markdown-table-container) {
++  margin-block: calc(var(--response-font-unit) * 10.4);
++}
++
++html[data-response-font-sizing] .assistant-response-markdown > :first-child {
++  margin-top: 0;
++}
++
++html[data-response-font-sizing] .assistant-response-markdown > :last-child {
++  margin-bottom: 0;
++}
++
++html[data-response-font-sizing] .assistant-response-markdown section[data-footnotes] {
++  font-size: calc(var(--response-font-unit) * 12);
++}
++
++html[data-response-font-sizing]
++  .assistant-response-markdown
++  :is(a[data-footnote-ref], a[data-footnote-backref]) {
++  font-size: calc(var(--response-font-unit) * 11);
++}
++
++html[data-response-font-sizing] .assistant-response-markdown table {
++  font-size: var(--font-size-response);
++}
+diff --git a/packages/contracts/src/settings.test.ts b/packages/contracts/src/settings.test.ts
+index a5a27235bb..7799af3a04 100644
+--- a/packages/contracts/src/settings.test.ts
++++ b/packages/contracts/src/settings.test.ts
+@@ -41,6 +41,32 @@ const encodeServerSettings = Schema.encodeSync(ServerSettings);
+ const encodeServerSettingsPatch = Schema.encodeSync(ServerSettingsPatch);
+ const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+ 
++describe("response typography settings", () => {
++  it("defaults off and persists a response size independently of the interface", () => {
++    const defaults = decodeClientSettings({});
++    expect(defaults.responseFontSizeEnabled).toBe(false);
++    expect(defaults.fontSizeResponse).toBe(14);
++    const custom = decodeClientSettings({
++      responseFontSizeEnabled: true,
++      fontSizeResponse: 22,
++      fontSizeInterface: 16,
++    });
++    expect(decodeClientSettings(encodeClientSettings(custom))).toEqual(custom);
++    expect(decodeClientSettingsPatch({ responseFontSizeEnabled: false })).toEqual({
++      responseFontSizeEnabled: false,
++    });
++    expect(decodeClientSettingsPatch({ fontSizeResponse: 28 })).toEqual({ fontSizeResponse: 28 });
++  });
++
++  it.each([11, 29, 16.5, "20", null])(
++    "rejects invalid response font size %s at both persistence boundaries",
++    (fontSizeResponse) => {
++      expect(() => decodeClientSettings({ fontSizeResponse })).toThrow();
++      expect(() => decodeClientSettingsPatch({ fontSizeResponse })).toThrow();
++    },
++  );
++});
++
+ describe("storage cleanup settings", () => {
+   it("keeps cleanup disabled for existing installations", () => {
+     expect(decodeServerSettings({}).worktreeCleanup).toBeNull();
+diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
+index 609d377072..6d38bf84cc 100644
+--- a/packages/contracts/src/settings.ts
++++ b/packages/contracts/src/settings.ts
+@@ -171,6 +171,14 @@ export const InterfaceFontSize = Schema.Int.check(
+ export type InterfaceFontSize = typeof InterfaceFontSize.Type;
+ export const DEFAULT_INTERFACE_FONT_SIZE: InterfaceFontSize = 16;
+ 
++export const MIN_RESPONSE_FONT_SIZE = 12;
++export const MAX_RESPONSE_FONT_SIZE = 28;
++export const ResponseFontSize = Schema.Int.check(
++  Schema.isBetween({ minimum: MIN_RESPONSE_FONT_SIZE, maximum: MAX_RESPONSE_FONT_SIZE }),
++);
++export type ResponseFontSize = typeof ResponseFontSize.Type;
++export const DEFAULT_RESPONSE_FONT_SIZE: ResponseFontSize = 14;
++
+ export const MIN_PROMPT_FONT_SIZE = 12;
+ export const MAX_PROMPT_FONT_SIZE = 20;
+ export const PromptFontSize = Schema.Int.check(
+@@ -471,6 +479,10 @@ export const ClientSettingsSchema = Schema.Struct({
+   fontSizeInterface: InterfaceFontSize.pipe(
+     Schema.withDecodingDefault(Effect.succeed(DEFAULT_INTERFACE_FONT_SIZE)),
+   ),
++  responseFontSizeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
++  fontSizeResponse: ResponseFontSize.pipe(
++    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESPONSE_FONT_SIZE)),
++  ),
+   fontSizePrompt: PromptFontSize.pipe(
+     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROMPT_FONT_SIZE)),
+   ),
+@@ -2061,6 +2073,8 @@ export const ClientSettingsPatch = Schema.Struct({
+   glassOpacity: Schema.optionalKey(GlassOpacity),
+   onboardingCompletedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
+   fontSizeInterface: Schema.optionalKey(InterfaceFontSize),
++  responseFontSizeEnabled: Schema.optionalKey(Schema.Boolean),
++  fontSizeResponse: Schema.optionalKey(ResponseFontSize),
+   fontSizePrompt: Schema.optionalKey(PromptFontSize),
+   fontSizeCode: Schema.optionalKey(CodeFontSize),
+   fontSizeTerminal: Schema.optionalKey(TerminalFontSize),
+diff --git a/scripts/scenarios/response-font-size.e2e.ts b/scripts/scenarios/response-font-size.e2e.ts
+new file mode 100644
+index 0000000000..04d88dbd5d
+--- /dev/null
++++ b/scripts/scenarios/response-font-size.e2e.ts
+@@ -0,0 +1,98 @@
++import { expect } from "e2e";
++
++import { test, WEB } from "./t3.ts";
++
++test(
++  "Response font sizing is opt-in, persists, and falls back to Interface when disabled",
++  WEB,
++  async ({ t3, app, screen, browser }) => {
++    const fontSize = (selector: string) =>
++      browser.evaluate<string | null, string>(
++        `(selector) => {
++        const node = document.querySelector(selector);
++        return node ? getComputedStyle(node).fontSize : null;
++      }`,
++        selector,
++      );
++    const project = await t3.project("response-typography", {
++      "src/math.ts": "export const sum = 1 + 1;\n",
++    });
++    await t3.thread({
++      project,
++      title: "Response typography",
++      messages: ["Show a response"],
++      model: "showcase",
++    });
++    await t3.open();
++    const thread = screen.getByRole("button", { name: /Response typography,/ });
++    await expect(thread).toBeVisible();
++    await thread.tap();
++    await expect(screen.getByText("This turn is a replay.", { exact: false })).toBeVisible();
++    await app.screenshot("response-font-default");
++    await app.open("/settings/appearance");
++    const responseSize = screen.getByRole("combobox", "AI response font size", { exact: true });
++    await expect(responseSize).toBeHidden();
++    await screen.getByRole("combobox", "Interface font size", { exact: true }).tap();
++    await screen.getByRole("option", "18 px", { exact: true }).tap();
++
++    await app.open("/settings/labs");
++    const toggle = screen.getByRole("switch", "Enable response font sizing", { exact: true });
++    await expect(toggle).not.toBeChecked();
++    await toggle.tap();
++    await app.open("/settings/appearance");
++    await expect(responseSize).toBeVisible();
++    await responseSize.tap();
++    await screen.getByRole("option", "22 px", { exact: true }).tap();
++    await expect.poll(() => fontSize('[data-testid="response-font-preview"] p')).toBe("22px");
++    await app.screenshot("response-font-preview");
++    await app.open("/");
++    await thread.tap();
++    const responseStyle = async () => {
++      const [response, user, interfaceSize] = await Promise.all([
++        fontSize('[data-message-role="assistant"] .assistant-response-markdown p'),
++        fontSize(
++          '[data-message-role="user"] .user-message-markdown p, [data-message-role="user"] button[aria-expanded]',
++        ),
++        fontSize("html"),
++      ]);
++      return { response, user, interface: interfaceSize };
++    };
++    await expect
++      .poll(responseStyle)
++      .toEqual({ response: "22px", user: "15.75px", interface: "18px" });
++    await expect
++      .poll(() => fontSize('[data-message-role="assistant"] .assistant-response-markdown td'))
++      .toBe("22px");
++    await app.screenshot("response-font-independent");
++    await screen.getByRole("textbox").fill("Give me another short tour");
++    await screen.getByRole("textbox").press("Enter");
++    await expect
++      .poll(() => fontSize(".assistant-response-markdown[data-streaming] p"))
++      .toBe("22px");
++    await app.screenshot("response-font-streaming");
++    await expect(screen.getByRole("button", "Stop generation")).toBeHidden();
++    await app.open("/settings/appearance");
++    await expect(responseSize).toHaveText("22 px");
++    await app.open("/settings/labs");
++    await toggle.tap();
++    await app.open("/settings/appearance");
++    await expect(responseSize).toBeHidden();
++    await app.open("/");
++    await thread.tap();
++    await expect
++      .poll(responseStyle)
++      .toEqual({ response: "15.75px", user: "15.75px", interface: "18px" });
++    await app.screenshot("response-font-disabled");
++    await app.open("/settings/labs");
++    await expect(toggle).not.toBeChecked();
++    await toggle.tap();
++    await app.open("/settings/appearance");
++    await expect(responseSize).toHaveText("22 px");
++    await screen
++      .getByRole("button", "Reset AI response font size to default", { exact: true })
++      .tap();
++    await expect(responseSize).toHaveText("14 px");
++    await expect.poll(() => fontSize('[data-testid="response-font-preview"] p')).toBe("14px");
++    await app.screenshot("response-font-reset");
++  },
++);

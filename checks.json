@@ -20,7 +20,12 @@
         "apps/web/src/hooks/useThreadActionMenu.test.ts",
         "apps/web/src/hooks/useHandleNewThread.test.ts",
         "apps/web/src/composerDraftStore.test.ts",
-        "apps/server/src/serverSettings.test.ts"
+        "apps/server/src/serverSettings.test.ts",
+        "packages/contracts/src/settings.test.ts",
+        "apps/web/src/components/settings/settingsSearch.test.ts",
+        "apps/web/src/components/settings/SettingsPanels.logic.test.ts",
+        "apps/web/src/hooks/useSettings.test.ts",
+        "apps/desktop/src/settings/DesktopClientSettings.test.ts"
       ]
     },
     {
@@ -40,6 +45,8 @@
         "src/components/InitiativeSidebar.browser.test.tsx",
         "src/components/Sidebar.initiatives.browser.test.tsx",
         "src/components/Sidebar.initiativeCreation.browser.test.tsx",
+        "src/appearanceFonts.browser.test.ts",
+        "src/components/settings/TypographySettings.browser.test.tsx",
         "--project",
         "browser"
       ]
@@ -53,6 +60,7 @@
         "scenarios/initiative-settled.e2e.ts",
         "scenarios/kp-experience.e2e.ts",
         "scenarios/initiative-archived.e2e.ts",
+        "scenarios/response-font-size.e2e.ts",
         "--target",
         "web"
       ]
@@ -113,7 +121,9 @@
       "New initiative",
       "Project manager",
       "Threads outside initiatives",
-      "Enable initiative management"
+      "Enable initiative management",
+      "Enable response font sizing",
+      "AI response font size"
     ],
     "apps/server/dist/": [
       "t3_initiative_list",
