@@ -1,5 +1,5 @@
 diff --git a/apps/web/src/components/InitiativeSidebar.browser.test.tsx b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
-index 916595c5..2da2f6a3 100644
+index 916595c526..2da2f6a319 100644
 --- a/apps/web/src/components/InitiativeSidebar.browser.test.tsx
 +++ b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
 @@ -9,12 +9,15 @@ import { applyInitiativeChange } from "@t3tools/shared/initiatives";
@@ -95,7 +95,7 @@ index 916595c5..2da2f6a3 100644
 +  ]);
 +});
 diff --git a/apps/web/src/components/InitiativeSidebar.tsx b/apps/web/src/components/InitiativeSidebar.tsx
-index 12cc99cd..1a2d6720 100644
+index 12cc99cd2c..1a2d672033 100644
 --- a/apps/web/src/components/InitiativeSidebar.tsx
 +++ b/apps/web/src/components/InitiativeSidebar.tsx
 @@ -1,5 +1,5 @@
@@ -176,7 +176,7 @@ index 12cc99cd..1a2d6720 100644
            </Button>
            <Button disabled={busy || !name.trim()} onClick={() => void save()}>
 diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
-index 949e410b..aa9af60d 100644
+index 949e410b95..aa9af60ddd 100644
 --- a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 +++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 @@ -17,6 +17,8 @@ import {
@@ -214,7 +214,7 @@ index 949e410b..aa9af60d 100644
 +  await expect.element(row(a.title)).toBeVisible();
  });
 diff --git a/apps/web/src/hooks/useSettings.ts b/apps/web/src/hooks/useSettings.ts
-index 2310a7d2..5472018c 100644
+index d5565f6a4f..96095f1c6b 100644
 --- a/apps/web/src/hooks/useSettings.ts
 +++ b/apps/web/src/hooks/useSettings.ts
 @@ -9,7 +9,7 @@ import {
@@ -226,7 +226,7 @@ index 2310a7d2..5472018c 100644
    sessionGrantsScope,
  } from "@t3tools/contracts";
  import {
-@@ -240,7 +240,7 @@ export async function persistClientSettingsUpdate(
+@@ -265,7 +265,7 @@ export async function persistClientSettingsUpdate(
    });
  }
  
@@ -236,13 +236,13 @@ index 2310a7d2..5472018c 100644
  function splitPatch(patch: UnifiedSettingsPatch): {
    serverPatch: ServerSettingsPatch;
 diff --git a/apps/web/test/fakeEnvironment.ts b/apps/web/test/fakeEnvironment.ts
-index 881832db..a70755d0 100644
+index b53924db0c..8d92a790b1 100644
 --- a/apps/web/test/fakeEnvironment.ts
 +++ b/apps/web/test/fakeEnvironment.ts
-@@ -28,7 +28,10 @@ import {
-   type OrchestrationV2ThreadStreamItem,
+@@ -35,7 +35,10 @@ import {
    type OrchestrationV2TurnItem,
    type TerminalMetadataStreamEvent,
+   type ResolvedKeybindingsConfig,
 +  type ServerConfigStreamEvent,
 +  type ServerSettingsPatch,
  } from "@t3tools/contracts";
@@ -250,17 +250,28 @@ index 881832db..a70755d0 100644
  import type {
    ConnectionAttemptError,
    ConnectionCatalogEntry,
-@@ -335,6 +338,9 @@ let projects: ReadonlyArray<OrchestrationProjectShell> = [project];
+@@ -409,16 +412,19 @@ const json = (body: unknown, status = 200) =>
+ const threadSubscribers = new Map<string, Queue.Queue<OrchestrationV2ThreadStreamItem>>();
+ let terminalMetadataSubscriber: Queue.Queue<TerminalMetadataStreamEvent> | null = null;
+ let threads: ReadonlyArray<FakeThread> = [];
++let projects: ReadonlyArray<OrchestrationProjectShell> = [project];
  let configOverrides: Partial<ServerConfig> = {};
  let dispatched: OrchestrationV2Command[] = [];
  let acceptCommands = false;
+-let projects: ReadonlyArray<OrchestrationProjectShell> = [project];
+ let holdCommand: (command: OrchestrationV2Command) => boolean = () => false;
+ let pendingDispatches: Array<{
+   readonly command: OrchestrationV2Command;
+   readonly reply: Deferred.Deferred<never, OrchestrationV2DispatchCommandError>;
+ }> = [];
+ let pendingAssetUrls: Array<Deferred.Deferred<AssetCreateUrlResult>> = [];
 +let acceptSettingsUpdates = false;
 +let settingsWrites: ServerSettingsPatch[] = [];
 +const configSubscribers = new Set<Queue.Queue<ServerConfigStreamEvent>>();
  let sequence = 1;
  let vcsStatusSubscriber: Queue.Queue<VcsStatusStreamEvent> | null = null;
  
-@@ -352,6 +358,17 @@ const subscribe = <A>(first: ReadonlyArray<A>, register?: (queue: Queue.Queue<A>
+@@ -436,6 +442,17 @@ const subscribe = <A>(first: ReadonlyArray<A>, register?: (queue: Queue.Queue<A>
    );
  
  const handlers: Record<string, (input: never) => unknown> = {
@@ -278,7 +289,7 @@ index 881832db..a70755d0 100644
    // Recorded, and accepted only when the scenario asks, since a pending command holds every
    // later command on its thread. Accepted commands' events never arrive.
    [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command: OrchestrationV2Command) =>
-@@ -415,10 +432,20 @@ const handlers: Record<string, (input: never) => unknown> = {
+@@ -510,10 +527,20 @@ const handlers: Record<string, (input: never) => unknown> = {
          if (vcsStatusSubscriber === queue) vcsStatusSubscriber = null;
        };
      }),
@@ -301,7 +312,7 @@ index 881832db..a70755d0 100644
  // Unanswered calls stay pending, like a server that has not replied yet.
  const client = new Proxy(handlers, {
    get: (target, method: string) =>
-@@ -432,8 +459,7 @@ const client = new Proxy(handlers, {
+@@ -527,8 +554,7 @@ const client = new Proxy(handlers, {
  const session: EnvironmentConnectionLease["session"] = {
    client: client as unknown as WsRpcProtocolClient,
    initialConfig: Effect.sync(serverConfig),
@@ -311,7 +322,7 @@ index 881832db..a70755d0 100644
    ready: Effect.void,
    probe: Effect.void,
    inboundFrames: Effect.succeed(0),
-@@ -471,6 +497,7 @@ export function installFakeEnvironment(
+@@ -566,6 +592,7 @@ export function installFakeEnvironment(
    fixtures: ReadonlyArray<FakeThread>,
    options?: {
      readonly acceptCommands?: boolean;
@@ -319,25 +330,25 @@ index 881832db..a70755d0 100644
      readonly settings?: Partial<ServerConfig["settings"]>;
      readonly initiativeGroups?: boolean;
      readonly projects?: ReadonlyArray<OrchestrationProjectShell>;
-@@ -488,6 +515,8 @@ export function installFakeEnvironment(
-   };
-   dispatched = [];
-   acceptCommands = options?.acceptCommands === true;
+@@ -600,6 +627,8 @@ export function installFakeEnvironment(
+     })),
+   ];
+   holdCommand = options?.holdCommand ?? (() => false);
 +  acceptSettingsUpdates = options?.acceptSettingsUpdates === true;
 +  settingsWrites = [];
    globalThis.fetch = async (input, init) => {
      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
      if (url.origin !== window.location.origin) return realFetch(input, init);
-@@ -513,6 +542,8 @@ export function installFakeEnvironment(
-       configOverrides = {};
-       dispatched = [];
-       acceptCommands = false;
+@@ -629,6 +658,8 @@ export function installFakeEnvironment(
+       holdCommand = () => false;
+       pendingDispatches = [];
+       pendingAssetUrls = [];
 +      acceptSettingsUpdates = false;
 +      settingsWrites = [];
      },
    };
  }
-@@ -522,6 +553,14 @@ export function dispatchedCommands(): ReadonlyArray<OrchestrationV2Command> {
+@@ -669,6 +700,14 @@ export function dispatchedCommands(): ReadonlyArray<OrchestrationV2Command> {
    return dispatched;
  }
  
@@ -351,10 +362,10 @@ index 881832db..a70755d0 100644
 +
  type ThreadEvent = Extract<OrchestrationV2ThreadStreamItem, { readonly kind: "event" }>["event"];
  
- export async function emitTerminalMetadata(event: TerminalMetadataStreamEvent): Promise<void> {
+ /** Answers one RPC method with `handler` until disposed. */
 diff --git a/scripts/scenarios/initiative-save.e2e.ts b/scripts/scenarios/initiative-save.e2e.ts
 new file mode 100644
-index 00000000..cc71f9fc
+index 0000000000..cc71f9fc56
 --- /dev/null
 +++ b/scripts/scenarios/initiative-save.e2e.ts
 @@ -0,0 +1,24 @@

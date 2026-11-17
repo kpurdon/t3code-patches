@@ -71,18 +71,18 @@ index 0cb0a7f8d5..3d05752b85 100644
      if (assignedId === undefined)
        return yield* new OrchestratorMcpFailure({
 diff --git a/apps/server/src/mcp/OrchestratorMcpService.test.ts b/apps/server/src/mcp/OrchestratorMcpService.test.ts
-index c2987e3ba7..aafade6b44 100644
+index 31f5e1e9c1..303a7a8ef5 100644
 --- a/apps/server/src/mcp/OrchestratorMcpService.test.ts
 +++ b/apps/server/src/mcp/OrchestratorMcpService.test.ts
-@@ -2098,7 +2098,7 @@ describe("OrchestratorMcpService provider resolution", () => {
-             { databaseLayer: layerDatabase, runEffectWorker: false },
-           );
-           const layerSettings = ServerSettings.layerTest({
--            kpExperienceEnabled: true,
-+            initiativeManagementEnabled: true,
-             initiatives: {
-               original: {
-                 name: "Original",
+@@ -2815,7 +2815,7 @@ describe("OrchestratorMcpService provider resolution", () => {
+           { databaseLayer: layerDatabase, runEffectWorker: false },
+         );
+         const layerSettings = ServerSettings.layerTest({
+-          kpExperienceEnabled: true,
++          initiativeManagementEnabled: true,
+           initiatives: {
+             original: {
+               name: "Original",
 diff --git a/apps/server/src/mcp/toolkits/initiatives.test.ts b/apps/server/src/mcp/toolkits/initiatives.test.ts
 index 17645c4d22..cbf29ce101 100644
 --- a/apps/server/src/mcp/toolkits/initiatives.test.ts
@@ -171,10 +171,10 @@ index 17645c4d22..cbf29ce101 100644
 +  },
 +);
 diff --git a/apps/server/src/mcp/toolkits/project/handlers.test.ts b/apps/server/src/mcp/toolkits/project/handlers.test.ts
-index 9990c6ea0d..772a8df368 100644
+index 9fc7690600..33d0e7d44f 100644
 --- a/apps/server/src/mcp/toolkits/project/handlers.test.ts
 +++ b/apps/server/src/mcp/toolkits/project/handlers.test.ts
-@@ -356,7 +356,7 @@ it.effect("a launch retried with the same clientRequestId replays the first one"
+@@ -440,7 +440,7 @@ it.effect("a launch retried with the same clientRequestId replays the first one"
      });
      yield* Effect.gen(function* () {
        const settings = yield* ServerSettings.ServerSettingsService;
@@ -184,10 +184,10 @@ index 9990c6ea0d..772a8df368 100644
          initiativeChange: {
            action: "create",
 diff --git a/apps/server/src/mcp/toolkits/thread/handlers.ts b/apps/server/src/mcp/toolkits/thread/handlers.ts
-index 4e8ff8fcc1..ba7b1ca94d 100644
+index e1d6c1f832..217a119718 100644
 --- a/apps/server/src/mcp/toolkits/thread/handlers.ts
 +++ b/apps/server/src/mcp/toolkits/thread/handlers.ts
-@@ -94,10 +94,10 @@ const writesThread = <P extends { readonly threadId?: ThreadId | undefined }, A,
+@@ -110,10 +110,10 @@ const writesThread = <P extends { readonly threadId?: ThreadId | undefined }, A,
  const readInitiativeSettings = Effect.fn("mcp.readInitiativeSettings")(function* () {
    const service = yield* ServerSettingsService;
    const settings = yield* service.getSettings.pipe(Effect.mapError(unavailable));
@@ -201,10 +201,10 @@ index 4e8ff8fcc1..ba7b1ca94d 100644
    return settings;
  });
 diff --git a/apps/server/src/serverSettings.test.ts b/apps/server/src/serverSettings.test.ts
-index e450ed8dd7..41d3066981 100644
+index 4d131ba911..471e00801b 100644
 --- a/apps/server/src/serverSettings.test.ts
 +++ b/apps/server/src/serverSettings.test.ts
-@@ -152,7 +152,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+@@ -153,7 +153,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
          config.settingsPath,
          JSON.stringify({
            projectSettingsFolded: true,
@@ -213,7 +213,7 @@ index e450ed8dd7..41d3066981 100644
            responseStreamingMode: "turn",
            initiatives: groups,
          }),
-@@ -178,12 +178,14 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+@@ -179,12 +179,14 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
        assert.equal(yield* fs.readFileString(config.settingsPath), settingsFile);
        assert.deepEqual(JSON.parse(yield* fs.readFileString(initiativesPath)).routing, saved);
        const membershipFile = yield* fs.readFileString(initiativesPath);
@@ -232,7 +232,7 @@ index e450ed8dd7..41d3066981 100644
        );
        const blocked = yield* Effect.flip(
          service.updateSettings({ initiativeChange: { action: "delete", id: "routing" } }),
-@@ -323,7 +325,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+@@ -324,7 +326,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
        const service = yield* ServerSettingsModule.ServerSettingsService;
        const initiativesPath = path.join(path.dirname(config.settingsPath), "initiatives.json");
        const original =
@@ -242,7 +242,7 @@ index e450ed8dd7..41d3066981 100644
        yield* fs.writeFileString(config.settingsPath, original);
        yield* fs.writeFileString(initiativesPath, JSON.stringify(groups));
 diff --git a/apps/server/src/serverSettings.ts b/apps/server/src/serverSettings.ts
-index d2e20de2a6..36f9e00442 100644
+index 23dbfd7b5e..23be8e3d08 100644
 --- a/apps/server/src/serverSettings.ts
 +++ b/apps/server/src/serverSettings.ts
 @@ -208,7 +208,7 @@ function ensureInitiativeWritesAllowed(
@@ -255,10 +255,10 @@ index d2e20de2a6..36f9e00442 100644
      : Effect.void;
  }
 diff --git a/apps/server/src/ws.ts b/apps/server/src/ws.ts
-index 004089c539..b38190083c 100644
+index d7567de324..1b4fd1fa5f 100644
 --- a/apps/server/src/ws.ts
 +++ b/apps/server/src/ws.ts
-@@ -1975,8 +1975,8 @@ export const layerWsRpc = (
+@@ -1885,8 +1885,8 @@ export const layerWsRpc = (
              : { managedPolicy: serverSettings.managedPolicy }),
            shellResumeCompletionMarker: true,
            shellThreadFamilies: true,
@@ -581,14 +581,14 @@ index e4f0536f47..a5d95903b1 100644
      <Dialog
        open
 diff --git a/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx b/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
-index c1f6ef814c..794f369462 100644
+index c1f6ef814c..1c948915a3 100644
 --- a/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
 +++ b/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
 @@ -18,9 +18,12 @@ import {
    threadWithHistory,
    savedServerSettings,
    dispatchedCommands,
-+  releaseThreadCreation,
++  acceptPendingCommand,
 +  emitServerSettings,
 +  serverSettingsWrites,
    type FakeDriver,
@@ -617,7 +617,7 @@ index c1f6ef814c..794f369462 100644
 +  using _environment = installFakeEnvironment([pm], {
 +    initiativeGroups: true,
 +    acceptCommands: true,
-+    holdThreadCreation: true,
++    holdCommand: (command) => command.type === "thread.create",
 +    acceptSettingsUpdates: true,
 +    settings: {
 +      initiativeManagementEnabled: true,
@@ -643,7 +643,7 @@ index c1f6ef814c..794f369462 100644
 +  await act(() => emitServerSettings({ initiativeManagementEnabled: false }));
 +  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
 +  await act(() => emitServerSettings({ initiativeManagementEnabled: true }));
-+  await act(releaseThreadCreation);
++  await act(acceptPendingCommand);
 +  expect(savedServerSettings().initiatives.routing?.memberThreadIds).toEqual([pm.id]);
 +  expect(serverSettingsWrites().some((patch) => patch.initiativeChange !== undefined)).toBe(false);
 +  expect(router.state.location.pathname).toBe(`/${ENVIRONMENT_ID}/${pm.id}`);
@@ -716,10 +716,10 @@ index 38be7d6115..56aeb8a3a7 100644
    const settings = useScopedSettings();
    const updateSettings = useUpdateScopedSettings();
 diff --git a/apps/web/src/components/settings/settingsSearch.ts b/apps/web/src/components/settings/settingsSearch.ts
-index 4f61ba41c0..dcd38440b6 100644
+index 937e37dd8e..34508ec662 100644
 --- a/apps/web/src/components/settings/settingsSearch.ts
 +++ b/apps/web/src/components/settings/settingsSearch.ts
-@@ -461,6 +461,12 @@ export const SETTINGS_SEARCH_ITEMS = [
+@@ -465,6 +465,12 @@ export const SETTINGS_SEARCH_ITEMS = [
      to: "/settings/general",
      searchTerms: ["hide fold running monitoring threads inbox sidebar shelf"],
    },
@@ -754,53 +754,34 @@ index 4cc9efda7e..58c90410de 100644
      ? config
      : null;
 diff --git a/apps/web/test/fakeEnvironment.ts b/apps/web/test/fakeEnvironment.ts
-index a3571e5cb2..2a9f8421aa 100644
+index cd781dcdb7..1a7d8c173b 100644
 --- a/apps/web/test/fakeEnvironment.ts
 +++ b/apps/web/test/fakeEnvironment.ts
-@@ -43,6 +43,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
- import { APP_VERSION } from "~/branding";
- import * as DateTime from "effect/DateTime";
- import * as Effect from "effect/Effect";
-+import * as Deferred from "effect/Deferred";
- import * as Queue from "effect/Queue";
- import type * as Scope from "effect/Scope";
- import * as Schema from "effect/Schema";
-@@ -338,6 +339,8 @@ let projects: ReadonlyArray<OrchestrationProjectShell> = [project];
- let configOverrides: Partial<ServerConfig> = {};
- let dispatched: OrchestrationV2Command[] = [];
- let acceptCommands = false;
-+let holdThreadCreation = false;
-+const pendingThreadCreations: Deferred.Deferred<{ readonly sequence: number }>[] = [];
+@@ -419,7 +419,10 @@ let acceptCommands = false;
+ let holdCommand: (command: OrchestrationV2Command) => boolean = () => false;
+ let pendingDispatches: Array<{
+   readonly command: OrchestrationV2Command;
+-  readonly reply: Deferred.Deferred<never, OrchestrationV2DispatchCommandError>;
++  readonly reply: Deferred.Deferred<
++    { readonly sequence: number },
++    OrchestrationV2DispatchCommandError
++  >;
+ }> = [];
+ let pendingAssetUrls: Array<Deferred.Deferred<AssetCreateUrlResult>> = [];
  let acceptSettingsUpdates = false;
- let settingsUpdateFailures = 0;
- let settingsWrites: ServerSettingsPatch[] = [];
-@@ -380,9 +383,15 @@ const handlers: Record<string, (input: never) => unknown> = {
-   // Recorded, and accepted only when the scenario asks, since a pending command holds every
-   // later command on its thread. Accepted commands' events never arrive.
-   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command: OrchestrationV2Command) =>
--    Effect.suspend(() => {
-+    Effect.gen(function* () {
+@@ -468,7 +471,10 @@ const handlers: Record<string, (input: never) => unknown> = {
        dispatched.push(command);
--      return acceptCommands ? Effect.succeed({ sequence: sequence + 1 }) : Effect.never;
-+      if (!acceptCommands) return yield* Effect.never;
-+      if (holdThreadCreation && command.type === "thread.create") {
-+        const pending = yield* Deferred.make<{ readonly sequence: number }>();
-+        pendingThreadCreations.push(pending);
-+        return yield* Deferred.await(pending);
-+      }
-+      return { sequence: sequence + 1 };
+       if (acceptCommands && !holdCommand(command))
+         return Effect.succeed({ sequence: sequence + 1 });
+-      const reply = Deferred.makeUnsafe<never, OrchestrationV2DispatchCommandError>();
++      const reply = Deferred.makeUnsafe<
++        { readonly sequence: number },
++        OrchestrationV2DispatchCommandError
++      >();
+       pendingDispatches.push({ command, reply });
+       return Deferred.await(reply);
      }),
-   [WS_METHODS.subscribeTerminalMetadata]: () =>
-     subscribe<TerminalMetadataStreamEvent>([{ type: "snapshot", terminals: [] }], (queue) => {
-@@ -505,6 +514,7 @@ export function installFakeEnvironment(
-   fixtures: ReadonlyArray<FakeThread>,
-   options?: {
-     readonly acceptCommands?: boolean;
-+    readonly holdThreadCreation?: boolean;
-     readonly acceptSettingsUpdates?: boolean;
-     readonly settingsUpdateFailures?: number;
-     readonly settings?: Partial<ServerConfig["settings"]>;
-@@ -520,10 +530,15 @@ export function installFakeEnvironment(
+@@ -623,7 +629,10 @@ export function installFakeEnvironment(
        : { settings: { ...baseServerConfig.settings, ...options.settings } }),
      ...(options?.initiativeGroups === undefined
        ? {}
@@ -812,21 +793,14 @@ index a3571e5cb2..2a9f8421aa 100644
    };
    dispatched = [];
    acceptCommands = options?.acceptCommands === true;
-+  holdThreadCreation = options?.holdThreadCreation === true;
-+  pendingThreadCreations.length = 0;
-   acceptSettingsUpdates = options?.acceptSettingsUpdates === true;
-   settingsUpdateFailures = options?.settingsUpdateFailures ?? 0;
-   settingsWrites = [];
-@@ -563,6 +578,26 @@ export function dispatchedCommands(): ReadonlyArray<OrchestrationV2Command> {
+@@ -710,6 +719,24 @@ export function dispatchedCommands(): ReadonlyArray<OrchestrationV2Command> {
    return dispatched;
  }
  
-+export async function releaseThreadCreation(): Promise<void> {
-+  await Effect.runPromise(
-+    Effect.forEach(pendingThreadCreations.splice(0), (pending) =>
-+      Deferred.succeed(pending, { sequence: sequence + 1 }),
-+    ),
-+  );
++export async function acceptPendingCommand(): Promise<void> {
++  const pending = pendingDispatches.shift();
++  if (!pending) throw new Error("No pending command");
++  await Effect.runPromise(Deferred.succeed(pending.reply, { sequence: sequence + 1 }));
 +}
 +
 +export async function emitServerSettings(patch: ServerSettingsPatch): Promise<void> {
@@ -845,10 +819,10 @@ index a3571e5cb2..2a9f8421aa 100644
    return settingsWrites;
  }
 diff --git a/packages/contracts/src/server.ts b/packages/contracts/src/server.ts
-index 1879288bba..809b91ac42 100644
+index 0d142330b2..c96c40d857 100644
 --- a/packages/contracts/src/server.ts
 +++ b/packages/contracts/src/server.ts
-@@ -631,7 +631,7 @@ export const ServerConfig = Schema.Struct({
+@@ -714,7 +714,7 @@ export const ServerConfig = Schema.Struct({
    shellThreadFamilies: Schema.optionalKey(Schema.Boolean),
    /** Persistent initiative display groups and native grouping tools. */
    initiativeGroups: Schema.optionalKey(Schema.Boolean),
@@ -858,10 +832,10 @@ index 1879288bba..809b91ac42 100644
    /**
     * The shell can leave older settled threads out of snapshots (`omitOlderSettled`), and
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index 9495c8d20d..609d377072 100644
+index c803b5cccf..6f87ed74b8 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
-@@ -1377,7 +1377,9 @@ export const InitiativeChange = Schema.Union([
+@@ -1397,7 +1397,9 @@ export const InitiativeChange = Schema.Union([
  export type InitiativeChange = typeof InitiativeChange.Type;
  
  export const ServerSettings = Schema.Struct({
@@ -872,7 +846,7 @@ index 9495c8d20d..609d377072 100644
    initiatives: Initiatives.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
    // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
    favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
-@@ -1767,7 +1769,7 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
+@@ -1803,7 +1805,7 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
  ) {
    override get message(): string {
      if (this.operation === "initiative-disabled")
@@ -881,7 +855,7 @@ index 9495c8d20d..609d377072 100644
      if (this.operation === "write-managed-setting") {
        return `${this.managedSetting ?? "This setting"} is managed by ${this.managedBy ?? "your organization"} and cannot be changed.`;
      }
-@@ -1850,7 +1852,7 @@ export const ServerSettingsPatch = Schema.Struct({
+@@ -1886,7 +1888,7 @@ export const ServerSettingsPatch = Schema.Struct({
      }),
    ),
    worktreesDirectory: Schema.optionalKey(TrimmedString),
@@ -1005,10 +979,10 @@ index 0000000000..98015a4532
 +  },
 +);
 diff --git a/scripts/scenarios/start-app.ts b/scripts/scenarios/start-app.ts
-index ef35b5dc93..179e2496f2 100644
+index c2feae4098..585f527d26 100644
 --- a/scripts/scenarios/start-app.ts
 +++ b/scripts/scenarios/start-app.ts
-@@ -69,7 +69,7 @@ const prepareHome = Effect.fn("startApp.prepareHome")(function* (home: string) {
+@@ -76,7 +76,7 @@ export const prepareHome = Effect.fn("startApp.prepareHome")(function* (home: st
    yield* fs.writeFileString(
      path.join(home, "userdata/settings.json"),
      yield* encodeSettings({
