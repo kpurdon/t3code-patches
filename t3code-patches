@@ -29,6 +29,7 @@ DEFAULT_DATA = Path.home() / '.local/share/t3code-patches'
 DEFAULT_CACHE = Path.home() / '.cache/t3code-patches'
 UPSTREAM = 'https://github.com/pingdotgg/t3code.git'
 LABEL = 'com.kpurdon.t3code-patches.update'
+LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
 PREFIXES = ('apps/server/dist', 'apps/desktop/dist-electron')
 PUBLIC_CONFIG = {
     'VITE_CLERK_PUBLISHABLE_KEY': 'T3CODE_CLERK_PUBLISHABLE_KEY',
@@ -485,14 +486,21 @@ def install_launcher(args):
     contents = app / 'Contents'
     (contents / 'MacOS').mkdir(parents=True, exist_ok=True)
     (contents / 'Resources').mkdir(exist_ok=True)
+    icon = Path(args.app).expanduser() / 'Contents/Resources/icon.icns'
+    if not icon.is_file():
+        raise Stop('Beta icon is missing: ' + str(icon))
+    shutil.copy2(icon, contents / 'Resources/icon.icns')
     with (contents / 'Info.plist').open('wb') as f:
         plistlib.dump({'CFBundleName': 'T3 Code (Patched Beta)', 'CFBundleDisplayName': 'T3 Code (Patched Beta)',
                       'CFBundleIdentifier': 'com.kpurdon.t3code-patches', 'CFBundleExecutable': 'launch',
-                      'CFBundlePackageType': 'APPL', 'CFBundleVersion': '1', 'LSUIElement': True}, f)
+                      'CFBundlePackageType': 'APPL', 'CFBundleVersion': '2',
+                      'CFBundleIconFile': 'icon.icns', 'LSApplicationCategoryType': 'public.app-category.developer-tools',
+                      'LSUIElement': False}, f)
     command = [sys.executable, str(REPO / 't3code-patches'), '--data-dir', str(Path(args.data_dir).expanduser().resolve()), 'launch']
     script = contents / 'MacOS/launch'
     script.write_text('#!/bin/sh\nexec ' + shlex.join(command) + '\n')
     script.chmod(0o755)
+    run([LSREGISTER, '-f', app])
     print('Installed launcher: ' + str(app))
 
 
