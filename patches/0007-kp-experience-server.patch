@@ -366,3 +366,15 @@ index 5dee3f26c1..ef35b5dc93 100644
        defaultModelSelection: REPLAY,
        providerInstances: Object.fromEntries(
          REAL_PROVIDERS.map((driver) => [
+diff --git a/apps/server/src/mcp/toolkits/project/handlers.test.ts b/apps/server/src/mcp/toolkits/project/handlers.test.ts
+index 1574e4b0ed..9990c6ea0d 100644
+--- a/apps/server/src/mcp/toolkits/project/handlers.test.ts
++++ b/apps/server/src/mcp/toolkits/project/handlers.test.ts
+@@ -356,6 +356,7 @@ it.effect("a launch retried with the same clientRequestId replays the first one"
+     });
+     yield* Effect.gen(function* () {
+       const settings = yield* ServerSettings.ServerSettingsService;
++      yield* settings.updateSettings({ kpExperienceEnabled: true });
+       yield* settings.updateSettings({
+         initiativeChange: {
+           action: "create",
