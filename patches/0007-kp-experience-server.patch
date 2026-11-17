@@ -1,5 +1,5 @@
 diff --git a/apps/server/src/initiatives.test.ts b/apps/server/src/initiatives.test.ts
-index cf30469085..69fb3776a7 100644
+index cf30469085..e182040d95 100644
 --- a/apps/server/src/initiatives.test.ts
 +++ b/apps/server/src/initiatives.test.ts
 @@ -8,6 +8,8 @@ it.effect(
@@ -11,7 +11,7 @@ index cf30469085..69fb3776a7 100644
        const pm = ThreadId.make("pm");
        yield* settings.updateSettings({
          initiativeChange: {
-@@ -28,6 +30,12 @@ it.effect(
+@@ -28,6 +30,23 @@ it.effect(
          new Set((yield* settings.getSettings).initiatives.routing?.memberThreadIds),
          new Set([pm, ...children]),
        );
@@ -20,11 +20,22 @@ index cf30469085..69fb3776a7 100644
 +      assert.deepEqual(yield* inheritInitiative(settings, pm, ThreadId.make("disabled-child")), {});
 +      assert.deepEqual(yield* inheritInitiative(settings, pm, children[0]!), {});
 +      assert.deepEqual((yield* settings.getSettings).initiatives, saved);
++      const disabledDuringWrite = {
++        ...settings,
++        getSettings: settings.getSettings.pipe(
++          Effect.map((current) => ({ ...current, kpExperienceEnabled: true })),
++        ),
++      };
++      assert.deepEqual(
++        yield* inheritInitiative(disabledDuringWrite, pm, ThreadId.make("late-child")),
++        {},
++      );
++      assert.deepEqual((yield* settings.getSettings).initiatives, saved);
 +      yield* settings.updateSettings({ kpExperienceEnabled: true });
        yield* settings.updateSettings({
          initiativeChange: {
            action: "create",
-@@ -52,6 +60,7 @@ it.effect(
+@@ -52,6 +71,7 @@ it.effect(
  it.effect("reports a repairable display warning without rejecting an accepted launch", () =>
    Effect.gen(function* () {
      const settings = yield* ServerSettingsService;
@@ -33,7 +44,7 @@ index cf30469085..69fb3776a7 100644
      yield* settings.updateSettings({
        initiativeChange: {
 diff --git a/apps/server/src/initiatives.ts b/apps/server/src/initiatives.ts
-index fbb41f4a28..96aba8cc5b 100644
+index fbb41f4a28..0cb0a7f8d5 100644
 --- a/apps/server/src/initiatives.ts
 +++ b/apps/server/src/initiatives.ts
 @@ -12,6 +12,7 @@ export const inheritInitiative = Effect.fn("initiatives.inherit")(function* (
@@ -52,6 +63,24 @@ index fbb41f4a28..96aba8cc5b 100644
      const assignedId = initiativeForThread(assigned.initiatives, threadId);
      if (assignedId === undefined)
        return yield* new OrchestratorMcpFailure({
+@@ -30,10 +32,13 @@ export const inheritInitiative = Effect.fn("initiatives.inherit")(function* (
+   }).pipe(
+     Effect.match({
+       onSuccess: (result) => result,
+-      onFailure: () => ({
+-        initiativeWarning:
+-          "Thread launched; initiative display assignment failed. Repair that assignment without launching another thread.",
+-      }),
++      onFailure: (error) =>
++        error._tag === "ServerSettingsError" && error.operation === "initiative-disabled"
++          ? {}
++          : {
++              initiativeWarning:
++                "Thread launched; initiative display assignment failed. Repair that assignment without launching another thread.",
++            },
+     }),
+   );
+ });
 diff --git a/apps/server/src/mcp/OrchestratorMcpService.test.ts b/apps/server/src/mcp/OrchestratorMcpService.test.ts
 index 5902c3a9f8..c2987e3ba7 100644
 --- a/apps/server/src/mcp/OrchestratorMcpService.test.ts
@@ -157,10 +186,18 @@ index ca4e6c063f..4e8ff8fcc1 100644
        if (change.action !== "create" && existing === undefined)
          return yield* new OrchestratorMcpFailure({
 diff --git a/apps/server/src/serverSettings.test.ts b/apps/server/src/serverSettings.test.ts
-index 8ba97ef3be..f18ec2b761 100644
+index 8ba97ef3be..e450ed8dd7 100644
 --- a/apps/server/src/serverSettings.test.ts
 +++ b/apps/server/src/serverSettings.test.ts
-@@ -176,6 +176,16 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+@@ -152,6 +152,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+         config.settingsPath,
+         JSON.stringify({
+           projectSettingsFolded: true,
++          kpExperienceEnabled: true,
+           responseStreamingMode: "turn",
+           initiatives: groups,
+         }),
+@@ -176,6 +177,20 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
        assert.sameMembers([...saved.memberThreadIds], [pm, "api", "web"]);
        assert.equal(yield* fs.readFileString(config.settingsPath), settingsFile);
        assert.deepEqual(JSON.parse(yield* fs.readFileString(initiativesPath)).routing, saved);
@@ -172,13 +209,99 @@ index 8ba97ef3be..f18ec2b761 100644
 +        (yield* decodeServerSettingsJson(yield* fs.readFileString(config.settingsPath)))
 +          .kpExperienceEnabled,
 +      );
++      const blocked = yield* Effect.flip(
++        service.updateSettings({ initiativeChange: { action: "delete", id: "routing" } }),
++      );
++      assert.equal(blocked.operation, "initiative-disabled");
 +      assert.equal(yield* fs.readFileString(initiativesPath), membershipFile);
 +      assert.deepEqual((yield* service.getSettings).initiatives.routing, saved);
      }).pipe(Effect.provide(layerServerSettings())),
    );
  
+@@ -307,7 +322,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+       const path = yield* Path.Path;
+       const service = yield* ServerSettingsModule.ServerSettingsService;
+       const initiativesPath = path.join(path.dirname(config.settingsPath), "initiatives.json");
+-      const original = '{"projectSettingsFolded":true,"responseStreamingMode":"turn"}';
++      const original =
++        '{"kpExperienceEnabled":true,"projectSettingsFolded":true,"responseStreamingMode":"turn"}';
+       const groups = { old: { name: "Old", coordinatorThreadId: null, memberThreadIds: [] } };
+       yield* fs.writeFileString(config.settingsPath, original);
+       yield* fs.writeFileString(initiativesPath, JSON.stringify(groups));
+diff --git a/apps/server/src/serverSettings.ts b/apps/server/src/serverSettings.ts
+index a9eda8e731..d2e20de2a6 100644
+--- a/apps/server/src/serverSettings.ts
++++ b/apps/server/src/serverSettings.ts
+@@ -202,6 +202,17 @@ export function applyProviderInstanceMutation(
+   return { ...settings, providerInstances };
+ }
+ 
++function ensureInitiativeWritesAllowed(
++  current: ServerSettings,
++  patch: ServerSettingsPatch,
++  settingsPath: string,
++) {
++  return patch.initiativeChange !== undefined &&
++    (patch.kpExperienceEnabled ?? current.kpExperienceEnabled) !== true
++    ? Effect.fail(new ServerSettingsError({ settingsPath, operation: "initiative-disabled" }))
++    : Effect.void;
++}
++
+ const secretProviderConfigGuards = new Map(
+   secretProviderDefinitions.definitions.map((definition) => [
+     definition.kind as string,
+@@ -332,11 +343,14 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
+     getSettings,
+     updateSettings: (patch) =>
+       updateTestSettings((currentSettings) =>
+-        Effect.succeed(applyServerSettingsPatch(currentSettings, patch)),
++        ensureInitiativeWritesAllowed(currentSettings, patch, "test settings").pipe(
++          Effect.as(applyServerSettingsPatch(currentSettings, patch)),
++        ),
+       ),
+     updateProviderInstance: (mutation, patch = {}) =>
+       updateTestSettings((currentSettings) =>
+         Effect.gen(function* () {
++          yield* ensureInitiativeWritesAllowed(currentSettings, patch, "test settings");
+           yield* ensureProviderInstanceMutationAllowed(currentSettings, mutation, "test settings");
+           const patched = applyServerSettingsPatch(currentSettings, patch);
+           return applyProviderInstanceMutation(patched, mutation);
+@@ -1282,6 +1296,7 @@ const make = Effect.gen(function* () {
+             cause: parseFailure.value,
+           });
+         }
++        yield* ensureInitiativeWritesAllowed(current, patch, settingsPath);
+         // An older client echoes a reference as the redacted marker; restore it before vetting so
+         // a removed provider's reference is cleared below rather than restored by persistence.
+         const updated = withEchoedSecretReferences(current, yield* update(current));
+diff --git a/apps/server/src/ws.ts b/apps/server/src/ws.ts
+index 69c5d43234..004089c539 100644
+--- a/apps/server/src/ws.ts
++++ b/apps/server/src/ws.ts
+@@ -1975,7 +1975,8 @@ export const layerWsRpc = (
+             : { managedPolicy: serverSettings.managedPolicy }),
+           shellResumeCompletionMarker: true,
+           shellThreadFamilies: true,
+-          initiativeGroups: true,
++          initiativeGroups: settings.kpExperienceEnabled,
++          kpExperienceSettings: true,
+           threadLinkMetadata: true,
+           shellOlderSettled: true,
+           threadResumeCompletionMarker: true,
+diff --git a/packages/contracts/src/server.ts b/packages/contracts/src/server.ts
+index 82d9bf20e2..1879288bba 100644
+--- a/packages/contracts/src/server.ts
++++ b/packages/contracts/src/server.ts
+@@ -631,6 +631,7 @@ export const ServerConfig = Schema.Struct({
+   shellThreadFamilies: Schema.optionalKey(Schema.Boolean),
+   /** Persistent initiative display groups and native grouping tools. */
+   initiativeGroups: Schema.optionalKey(Schema.Boolean),
++  kpExperienceSettings: Schema.optionalKey(Schema.Boolean),
+   threadLinkMetadata: Schema.optionalKey(Schema.Boolean),
+   /**
+    * The shell can leave older settled threads out of snapshots (`omitOlderSettled`), and
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index 395971a1cf..0b8ad16ca5 100644
+index 395971a1cf..9495c8d20d 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
 @@ -1377,6 +1377,7 @@ export const InitiativeChange = Schema.Union([
@@ -189,7 +312,24 @@ index 395971a1cf..0b8ad16ca5 100644
    initiatives: Initiatives.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
    // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
    favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
-@@ -1846,6 +1847,7 @@ export const ServerSettingsPatch = Schema.Struct({
+@@ -1741,6 +1742,7 @@ export const ServerSettingsOperation = Schema.Literals([
+   "prepare-directory",
+   "write-managed-setting",
+   "use-disallowed-provider",
++  "initiative-disabled",
+ ]);
+ export type ServerSettingsOperation = typeof ServerSettingsOperation.Type;
+ 
+@@ -1764,6 +1766,8 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
+   },
+ ) {
+   override get message(): string {
++    if (this.operation === "initiative-disabled")
++      return "Enable the KP Experience in Settings → Labs to manage initiatives.";
+     if (this.operation === "write-managed-setting") {
+       return `${this.managedSetting ?? "This setting"} is managed by ${this.managedBy ?? "your organization"} and cannot be changed.`;
+     }
+@@ -1846,6 +1850,7 @@ export const ServerSettingsPatch = Schema.Struct({
      }),
    ),
    worktreesDirectory: Schema.optionalKey(TrimmedString),
@@ -198,10 +338,10 @@ index 395971a1cf..0b8ad16ca5 100644
    responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
    enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
 diff --git a/packages/shared/src/initiatives.test.ts b/packages/shared/src/initiatives.test.ts
-index 80e688df4c..f2383df761 100644
+index 80e688df4c..b8f33ddc70 100644
 --- a/packages/shared/src/initiatives.test.ts
 +++ b/packages/shared/src/initiatives.test.ts
-@@ -12,12 +12,27 @@ const initial = (): Initiatives =>
+@@ -12,7 +12,11 @@ const initial = (): Initiatives =>
    );
  describe("initiative relationships", () => {
    it("creates a coordinator once and keeps independent additions under serialized settings patches", () => {
@@ -214,38 +354,6 @@ index 80e688df4c..f2383df761 100644
      for (const threadId of [api, ui, api])
        settings = applyServerSettingsPatch(settings, {
          initiativeChange: { action: "assign", id: "routing", threadId },
-       });
-     expect(settings.initiatives.routing?.memberThreadIds).toEqual([pm, api, ui]);
-+    settings = applyServerSettingsPatch(settings, { kpExperienceEnabled: false });
-+    settings = applyServerSettingsPatch(settings, {
-+      initiativeChange: {
-+        action: "assign",
-+        id: "routing",
-+        threadId: ThreadId.make("late-child"),
-+        onlyIfUngrouped: true,
-+      },
-+    });
-+    expect(settings.initiatives.routing?.memberThreadIds).toEqual([pm, api, ui]);
-+    settings = applyServerSettingsPatch(settings, { kpExperienceEnabled: true });
-     expect(settings.initiatives.routing?.coordinatorThreadId).toBe(pm);
-     expect(initiativeForThread(settings.initiatives, ui)).toBe("routing");
-     expect(initiativeForThread(settings.initiatives, ThreadId.make("outside"))).toBeUndefined();
-diff --git a/packages/shared/src/serverSettings.ts b/packages/shared/src/serverSettings.ts
-index ac61b161f8..d5fc76430c 100644
---- a/packages/shared/src/serverSettings.ts
-+++ b/packages/shared/src/serverSettings.ts
-@@ -504,7 +504,10 @@ export function applyServerSettingsPatch(
-   const nextWithReplacementsBase = {
-     ...next,
-     initiatives:
--      initiativeChange === undefined
-+      initiativeChange === undefined ||
-+      (initiativeChange.action === "assign" &&
-+        initiativeChange.onlyIfUngrouped === true &&
-+        !current.kpExperienceEnabled)
-         ? current.initiatives
-         : applyInitiativeChange(current.initiatives, initiativeChange),
-     favorites,
 diff --git a/scripts/scenarios/start-app.ts b/scripts/scenarios/start-app.ts
 index 5dee3f26c1..ef35b5dc93 100644
 --- a/scripts/scenarios/start-app.ts
