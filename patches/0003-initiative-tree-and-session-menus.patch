@@ -1,5 +1,5 @@
 diff --git a/apps/web/src/components/InitiativeSidebar.tsx b/apps/web/src/components/InitiativeSidebar.tsx
-index 1a2d672033..49883665e0 100644
+index 1a2d6720..49883665 100644
 --- a/apps/web/src/components/InitiativeSidebar.tsx
 +++ b/apps/web/src/components/InitiativeSidebar.tsx
 @@ -1,3 +1,10 @@
@@ -172,7 +172,7 @@ index 1a2d672033..49883665e0 100644
        )}
      </>
 diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
-index aa9af60ddd..2cd1fec66a 100644
+index aa9af60d..2cd1fec6 100644
 --- a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 +++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 @@ -19,6 +19,7 @@ import {
@@ -248,10 +248,10 @@ index aa9af60ddd..2cd1fec66a 100644
 +  expect(dispatchedCommands()).toEqual(commandsBeforeMenu);
  });
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index 63723624dd..49e3bc0cae 100644
+index e61c48d2..06e4e74b 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
-@@ -136,6 +136,7 @@ import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
+@@ -139,6 +139,7 @@ import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
  import { registerSettleAndAdvance } from "../settleAndAdvance";
  import { startNewThreadFromContext } from "../lib/chatThreadActions";
  import { useClientSettings } from "../hooks/useSettings";
@@ -259,7 +259,7 @@ index 63723624dd..49e3bc0cae 100644
  import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
  import { useLocalStorage } from "../hooks/useLocalStorage";
  import { useNowMinute } from "../hooks/useNowMinute";
-@@ -949,6 +950,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -955,6 +956,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
    const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
    const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
    const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -267,7 +267,7 @@ index 63723624dd..49e3bc0cae 100644
    const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
    const {
      settleThread,
-@@ -2662,6 +2664,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -2689,6 +2691,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
          const clicked = await settlePromise(() =>
            api.contextMenu.show(
              buildThreadActionMenuItems({
@@ -275,7 +275,7 @@ index 63723624dd..49e3bc0cae 100644
                canOperate: readEnvironmentScope(
                  threadRef.environmentId,
                  AuthOrchestrationOperateScope,
-@@ -2700,6 +2703,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -2728,6 +2731,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
            ),
          );
          if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -283,7 +283,7 @@ index 63723624dd..49e3bc0cae 100644
          if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
          if (clicked.value?.startsWith("snooze:")) {
            const preset =
-@@ -3311,6 +3315,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3356,6 +3360,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
            {!isSearchingThreads &&
            !hasProjectFolders &&
            visibleDraftSessionCount === 0 &&
@@ -291,7 +291,7 @@ index 63723624dd..49e3bc0cae 100644
            pinnedThreads.length +
              activeThreads.length +
              workingThreads.length +
-@@ -3390,6 +3395,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3443,6 +3448,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                          section: SidebarSection,
                          // The tree row of the project folder this row sits in.
                          folderRow?: string,
@@ -299,7 +299,7 @@ index 63723624dd..49e3bc0cae 100644
                        ) => {
                          const threadKey = scopedThreadKey(
                            scopeThreadRef(thread.environmentId, thread.id),
-@@ -3416,6 +3422,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3469,6 +3475,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              }
                              thread={thread}
                              variant={rowVariant}
@@ -308,7 +308,7 @@ index 63723624dd..49e3bc0cae 100644
                              navigationParent={
                                folderRow ??
                                (section === "working" ||
-@@ -3522,11 +3530,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3577,11 +3585,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            key="initiatives"
                            threads={threads}
                            groups={initiatives.groups}
@@ -324,7 +324,7 @@ index 63723624dd..49e3bc0cae 100644
                            onOpen={(environmentId, id) =>
 diff --git a/apps/web/src/components/initiativeEditor.ts b/apps/web/src/components/initiativeEditor.ts
 new file mode 100644
-index 0000000000..bd84da205b
+index 00000000..bd84da20
 --- /dev/null
 +++ b/apps/web/src/components/initiativeEditor.ts
 @@ -0,0 +1,23 @@
@@ -352,10 +352,10 @@ index 0000000000..bd84da205b
 +  return useEditor((state) => state.target);
 +}
 diff --git a/apps/web/src/components/sidebar/SidebarThreadRow.tsx b/apps/web/src/components/sidebar/SidebarThreadRow.tsx
-index d901418db8..3cc447c1c3 100644
+index 0f9de918..65e0e60e 100644
 --- a/apps/web/src/components/sidebar/SidebarThreadRow.tsx
 +++ b/apps/web/src/components/sidebar/SidebarThreadRow.tsx
-@@ -553,6 +553,8 @@ type SidebarThreadRowProps = {
+@@ -578,6 +578,8 @@ type SidebarThreadRowProps = {
    // "folder-multiline" adds the card's branch and PR line under it.
    variant: "card" | "slim" | "folder" | "folder-multiline";
    navigationParent?: string | undefined;
@@ -364,7 +364,7 @@ index d901418db8..3cc447c1c3 100644
    variantAction: SidebarSweepAction;
    settlementSupported: boolean;
    snoozeSupported: boolean;
-@@ -1235,6 +1237,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
+@@ -1335,6 +1337,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
            "list-none [content-visibility:auto] [contain-intrinsic-size:auto_--spacing(9)]",
            metaLine !== null && multiline && "[contain-intrinsic-size:auto_--spacing(13.5)]",
            sortable?.isDragging && "relative z-20",
@@ -376,7 +376,7 @@ index d901418db8..3cc447c1c3 100644
          )}
        >
          <Tooltip disabled={isRenaming || sortable?.isDragging}>
-@@ -1246,7 +1253,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
+@@ -1346,7 +1353,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                  tabIndex={0}
                  data-sidebar-row={threadKey}
                  data-sidebar-parent={props.navigationParent}
@@ -389,7 +389,7 @@ index d901418db8..3cc447c1c3 100644
                  aria-current={accessibility.current}
                  data-testid={inFolder ? "sidebar-row-folder" : "sidebar-row-slim"}
                  aria-busy={isRegeneratingTitle || undefined}
-@@ -1256,7 +1267,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
+@@ -1356,7 +1367,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                      ? "flex flex-col justify-center px-2.5 py-1.5"
                      : "flex h-9 items-center gap-2.5 px-2.5",
                    // Lines titles up with the folder name, past its chevron and icon.
@@ -399,7 +399,7 @@ index d901418db8..3cc447c1c3 100644
                  )}
                  onClick={handleClick}
                  onDoubleClick={handleDoubleClick}
-@@ -1267,6 +1279,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
+@@ -1367,6 +1379,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
            >
              {/* `contents` keeps one-line rows a single flex row. */}
              <div className={multiline ? "flex h-6 min-w-0 items-center gap-2.5" : "contents"}>
@@ -415,7 +415,7 @@ index d901418db8..3cc447c1c3 100644
                  <span
                    className={cn(
 diff --git a/apps/web/src/components/threadActionMenu.logic.test.ts b/apps/web/src/components/threadActionMenu.logic.test.ts
-index bd9dfdcdcc..d2a3bff9bf 100644
+index 0c13e765..9d77d376 100644
 --- a/apps/web/src/components/threadActionMenu.logic.test.ts
 +++ b/apps/web/src/components/threadActionMenu.logic.test.ts
 @@ -1,6 +1,10 @@
@@ -476,11 +476,11 @@ index bd9dfdcdcc..d2a3bff9bf 100644
      "disables both lifecycle directions without permission (reversed: %s)",
      (reversed) => {
 diff --git a/apps/web/src/components/threadActionMenu.logic.ts b/apps/web/src/components/threadActionMenu.logic.ts
-index 1e3eddd0b9..4fc92edaf0 100644
+index dc2d7687..157048ab 100644
 --- a/apps/web/src/components/threadActionMenu.logic.ts
 +++ b/apps/web/src/components/threadActionMenu.logic.ts
-@@ -2,6 +2,10 @@ import type { ContextMenuItem } from "@t3tools/contracts";
- import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
+@@ -5,6 +5,10 @@ import { msg } from "gt-react";
+ import { m, type MessageResolver } from "../i18n/messages";
  
  export type ThreadActionMenuId =
 +  | "initiative:start"
@@ -490,7 +490,7 @@ index 1e3eddd0b9..4fc92edaf0 100644
    | "find"
    | "new-thread-on-branch"
    | "filter-by-project"
-@@ -68,6 +72,12 @@ export function buildDraftActionMenuItems(options: {
+@@ -94,6 +98,12 @@ export function buildDraftActionMenuItems(
  }
  
  export interface ThreadActionMenuState {
@@ -502,8 +502,8 @@ index 1e3eddd0b9..4fc92edaf0 100644
 +    | undefined;
    readonly canOperate: boolean;
    readonly canFind?: boolean;
-   readonly branch: string | null;
-@@ -99,6 +109,7 @@ export interface ThreadActionMenuState {
+   /** False where no inline title editor is rendered, such as sidebar search results. */
+@@ -127,6 +137,7 @@ export interface ThreadActionMenuState {
  
  /** Local navigation, read markers, and copying remain available to read-only clients. */
  export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean {
@@ -511,8 +511,8 @@ index 1e3eddd0b9..4fc92edaf0 100644
    return ![
      "find",
      "new-thread-on-branch",
-@@ -117,6 +128,34 @@ export function buildThreadActionMenuItems(
-   state: ThreadActionMenuState,
+@@ -146,6 +157,34 @@ export function buildThreadActionMenuItems(
+   resolve: MessageResolver = m,
  ): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
    const items: ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> = [
 +    ...(state.initiative
@@ -544,11 +544,11 @@ index 1e3eddd0b9..4fc92edaf0 100644
 +        ]
 +      : []),
      ...(state.canFind
-       ? [{ id: "find" as const, label: "Find in thread", icon: "text-search" }]
+       ? [{ id: "find" as const, label: resolve(msg("Find in thread")), icon: "text-search" }]
        : []),
 diff --git a/apps/web/src/hooks/useInitiativeThreadActions.ts b/apps/web/src/hooks/useInitiativeThreadActions.ts
 new file mode 100644
-index 0000000000..4cc9efda7e
+index 00000000..4cc9efda
 --- /dev/null
 +++ b/apps/web/src/hooks/useInitiativeThreadActions.ts
 @@ -0,0 +1,99 @@
@@ -652,7 +652,7 @@ index 0000000000..4cc9efda7e
 +  return { menuState, handle };
 +}
 diff --git a/apps/web/src/hooks/useThreadActionMenu.test.ts b/apps/web/src/hooks/useThreadActionMenu.test.ts
-index 3c8255b04c..754478ff5a 100644
+index 3c8255b0..754478ff 100644
 --- a/apps/web/src/hooks/useThreadActionMenu.test.ts
 +++ b/apps/web/src/hooks/useThreadActionMenu.test.ts
 @@ -110,6 +110,9 @@ vi.mock("./useCopyToClipboard", () => ({
@@ -666,10 +666,10 @@ index 3c8255b04c..754478ff5a 100644
    useClientSettings: (select: (settings: unknown) => unknown) =>
      select({
 diff --git a/apps/web/src/hooks/useThreadActionMenu.ts b/apps/web/src/hooks/useThreadActionMenu.ts
-index f96baf908b..5be5c2d7aa 100644
+index 4e5914d0..89f573a4 100644
 --- a/apps/web/src/hooks/useThreadActionMenu.ts
 +++ b/apps/web/src/hooks/useThreadActionMenu.ts
-@@ -47,6 +47,7 @@ import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
+@@ -50,6 +50,7 @@ import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
  import { useCopyToClipboard } from "./useCopyToClipboard";
  import { useNewThreadHandler } from "./useHandleNewThread";
  import { useClientSettings } from "./useSettings";
@@ -677,7 +677,7 @@ index f96baf908b..5be5c2d7aa 100644
  import { canTurnThreadIntoProject, useThreadActions } from "./useThreadActions";
  
  function failureToast(title: string, error: unknown) {
-@@ -67,6 +68,7 @@ export function useThreadActionMenu(input: {
+@@ -70,6 +71,7 @@ export function useThreadActionMenu(input: {
    readonly canShareWithGuest: boolean;
  }) {
    const { threadRef, projectCwd, onStartRename, onFind, canShareWithGuest } = input;
@@ -685,7 +685,7 @@ index f96baf908b..5be5c2d7aa 100644
    const router = useRouter();
    const projects = useProjects();
    const primaryEnvironmentId = usePrimaryEnvironmentId();
-@@ -129,6 +131,7 @@ export function useThreadActionMenu(input: {
+@@ -139,6 +141,7 @@ export function useThreadActionMenu(input: {
        const isRegeneratingTitle = thread.titleRegeneration != null;
        const snoozePresets = resolveSnoozePresets(now, timestampFormat, threadRef.environmentId);
        const items = buildThreadActionMenuItems({
@@ -693,7 +693,7 @@ index f96baf908b..5be5c2d7aa 100644
          canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
          canFind: onFind !== undefined,
          branch: thread.branch ?? null,
-@@ -148,6 +151,7 @@ export function useThreadActionMenu(input: {
+@@ -158,6 +161,7 @@ export function useThreadActionMenu(input: {
        const clicked = await settlePromise(() => api.contextMenu.show(items, position));
        if (clicked._tag === "Failure" || clicked.value === null) return;
        const action: ThreadActionMenuId = clicked.value;
@@ -702,7 +702,7 @@ index f96baf908b..5be5c2d7aa 100644
          threadActionRequiresOperate(action) &&
          !readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope)
 diff --git a/scripts/scenarios/initiative-save.e2e.ts b/scripts/scenarios/initiative-save.e2e.ts
-index cc71f9fc56..19b445a163 100644
+index cc71f9fc..19b445a1 100644
 --- a/scripts/scenarios/initiative-save.e2e.ts
 +++ b/scripts/scenarios/initiative-save.e2e.ts
 @@ -3,22 +3,27 @@ import { expect } from "e2e";

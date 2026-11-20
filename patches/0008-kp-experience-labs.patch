@@ -1,5 +1,5 @@
 diff --git a/apps/server/src/initiatives.test.ts b/apps/server/src/initiatives.test.ts
-index e182040d95..3ca5b7bcff 100644
+index e182040d..3ca5b7bc 100644
 --- a/apps/server/src/initiatives.test.ts
 +++ b/apps/server/src/initiatives.test.ts
 @@ -8,8 +8,8 @@ it.effect(
@@ -49,7 +49,7 @@ index e182040d95..3ca5b7bcff 100644
      yield* settings.updateSettings({
        initiativeChange: {
 diff --git a/apps/server/src/initiatives.ts b/apps/server/src/initiatives.ts
-index 0cb0a7f8d5..3d05752b85 100644
+index 0cb0a7f8..3d05752b 100644
 --- a/apps/server/src/initiatives.ts
 +++ b/apps/server/src/initiatives.ts
 @@ -12,7 +12,7 @@ export const inheritInitiative = Effect.fn("initiatives.inherit")(function* (
@@ -71,10 +71,10 @@ index 0cb0a7f8d5..3d05752b85 100644
      if (assignedId === undefined)
        return yield* new OrchestratorMcpFailure({
 diff --git a/apps/server/src/mcp/OrchestratorMcpService.test.ts b/apps/server/src/mcp/OrchestratorMcpService.test.ts
-index 31f5e1e9c1..303a7a8ef5 100644
+index 5a28eca0..b8afa625 100644
 --- a/apps/server/src/mcp/OrchestratorMcpService.test.ts
 +++ b/apps/server/src/mcp/OrchestratorMcpService.test.ts
-@@ -2815,7 +2815,7 @@ describe("OrchestratorMcpService provider resolution", () => {
+@@ -3286,7 +3286,7 @@ describe("OrchestratorMcpService provider resolution", () => {
            { databaseLayer: layerDatabase, runEffectWorker: false },
          );
          const layerSettings = ServerSettings.layerTest({
@@ -84,7 +84,7 @@ index 31f5e1e9c1..303a7a8ef5 100644
              original: {
                name: "Original",
 diff --git a/apps/server/src/mcp/toolkits/initiatives.test.ts b/apps/server/src/mcp/toolkits/initiatives.test.ts
-index 17645c4d22..cbf29ce101 100644
+index 17645c4d..cbf29ce1 100644
 --- a/apps/server/src/mcp/toolkits/initiatives.test.ts
 +++ b/apps/server/src/mcp/toolkits/initiatives.test.ts
 @@ -79,7 +79,7 @@ const create = () =>
@@ -171,10 +171,10 @@ index 17645c4d22..cbf29ce101 100644
 +  },
 +);
 diff --git a/apps/server/src/mcp/toolkits/project/handlers.test.ts b/apps/server/src/mcp/toolkits/project/handlers.test.ts
-index 9fc7690600..33d0e7d44f 100644
+index 258a4156..c91f7143 100644
 --- a/apps/server/src/mcp/toolkits/project/handlers.test.ts
 +++ b/apps/server/src/mcp/toolkits/project/handlers.test.ts
-@@ -440,7 +440,7 @@ it.effect("a launch retried with the same clientRequestId replays the first one"
+@@ -465,7 +465,7 @@ it.effect("a launch retried with the same clientRequestId replays the first one"
      });
      yield* Effect.gen(function* () {
        const settings = yield* ServerSettings.ServerSettingsService;
@@ -184,10 +184,10 @@ index 9fc7690600..33d0e7d44f 100644
          initiativeChange: {
            action: "create",
 diff --git a/apps/server/src/mcp/toolkits/thread/handlers.ts b/apps/server/src/mcp/toolkits/thread/handlers.ts
-index e1d6c1f832..217a119718 100644
+index 68bfefcb..e307800c 100644
 --- a/apps/server/src/mcp/toolkits/thread/handlers.ts
 +++ b/apps/server/src/mcp/toolkits/thread/handlers.ts
-@@ -110,10 +110,10 @@ const writesThread = <P extends { readonly threadId?: ThreadId | undefined }, A,
+@@ -111,10 +111,10 @@ const writesThread = <P extends { readonly threadId?: ThreadId | undefined }, A,
  const readInitiativeSettings = Effect.fn("mcp.readInitiativeSettings")(function* () {
    const service = yield* ServerSettingsService;
    const settings = yield* service.getSettings.pipe(Effect.mapError(unavailable));
@@ -201,10 +201,10 @@ index e1d6c1f832..217a119718 100644
    return settings;
  });
 diff --git a/apps/server/src/serverSettings.test.ts b/apps/server/src/serverSettings.test.ts
-index 4d131ba911..471e00801b 100644
+index d02c62f7..e4d21ba9 100644
 --- a/apps/server/src/serverSettings.test.ts
 +++ b/apps/server/src/serverSettings.test.ts
-@@ -153,7 +153,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+@@ -155,7 +155,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
          config.settingsPath,
          JSON.stringify({
            projectSettingsFolded: true,
@@ -213,7 +213,7 @@ index 4d131ba911..471e00801b 100644
            responseStreamingMode: "turn",
            initiatives: groups,
          }),
-@@ -179,12 +179,14 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+@@ -181,12 +181,14 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
        assert.equal(yield* fs.readFileString(config.settingsPath), settingsFile);
        assert.deepEqual(JSON.parse(yield* fs.readFileString(initiativesPath)).routing, saved);
        const membershipFile = yield* fs.readFileString(initiativesPath);
@@ -232,7 +232,7 @@ index 4d131ba911..471e00801b 100644
        );
        const blocked = yield* Effect.flip(
          service.updateSettings({ initiativeChange: { action: "delete", id: "routing" } }),
-@@ -324,7 +326,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+@@ -326,7 +328,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
        const service = yield* ServerSettingsModule.ServerSettingsService;
        const initiativesPath = path.join(path.dirname(config.settingsPath), "initiatives.json");
        const original =
@@ -242,10 +242,10 @@ index 4d131ba911..471e00801b 100644
        yield* fs.writeFileString(config.settingsPath, original);
        yield* fs.writeFileString(initiativesPath, JSON.stringify(groups));
 diff --git a/apps/server/src/serverSettings.ts b/apps/server/src/serverSettings.ts
-index 23dbfd7b5e..23be8e3d08 100644
+index 90a9ff96..cc1316c7 100644
 --- a/apps/server/src/serverSettings.ts
 +++ b/apps/server/src/serverSettings.ts
-@@ -208,7 +208,7 @@ function ensureInitiativeWritesAllowed(
+@@ -209,7 +209,7 @@ function ensureInitiativeWritesAllowed(
    settingsPath: string,
  ) {
    return patch.initiativeChange !== undefined &&
@@ -255,10 +255,10 @@ index 23dbfd7b5e..23be8e3d08 100644
      : Effect.void;
  }
 diff --git a/apps/server/src/ws.ts b/apps/server/src/ws.ts
-index d7567de324..1b4fd1fa5f 100644
+index e6cf1eb7..11c20122 100644
 --- a/apps/server/src/ws.ts
 +++ b/apps/server/src/ws.ts
-@@ -1885,8 +1885,8 @@ export const layerWsRpc = (
+@@ -1901,8 +1901,8 @@ export const layerWsRpc = (
              : { managedPolicy: serverSettings.managedPolicy }),
            shellResumeCompletionMarker: true,
            shellThreadFamilies: true,
@@ -270,7 +270,7 @@ index d7567de324..1b4fd1fa5f 100644
            shellOlderSettled: true,
            threadResumeCompletionMarker: true,
 diff --git a/apps/web/src/components/InitiativeSidebar.browser.test.tsx b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
-index d2ded2d729..0e1be6b89e 100644
+index d2ded2d7..0e1be6b8 100644
 --- a/apps/web/src/components/InitiativeSidebar.browser.test.tsx
 +++ b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
 @@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
@@ -338,7 +338,7 @@ index d2ded2d729..0e1be6b89e 100644
    await expect
      .element(screen.getByRole("button", { name: "New initiative" }))
 diff --git a/apps/web/src/components/InitiativeSidebar.logic.test.ts b/apps/web/src/components/InitiativeSidebar.logic.test.ts
-index 14a6e3345b..b3ad891686 100644
+index 14a6e334..b3ad8916 100644
 --- a/apps/web/src/components/InitiativeSidebar.logic.test.ts
 +++ b/apps/web/src/components/InitiativeSidebar.logic.test.ts
 @@ -53,7 +53,9 @@ it("uses grouped order and scope for ranges while excluding collapsed and unrela
@@ -380,7 +380,7 @@ index 14a6e3345b..b3ad891686 100644
    expect(scoped.visibleThreads.map((thread) => thread.id)).toEqual([]);
    expect(scoped.groups[0]?.settledThreadIds).toEqual([b.id]);
 diff --git a/apps/web/src/components/InitiativeSidebar.logic.ts b/apps/web/src/components/InitiativeSidebar.logic.ts
-index a7949e0ce1..972c18661d 100644
+index a7949e0c..972c1866 100644
 --- a/apps/web/src/components/InitiativeSidebar.logic.ts
 +++ b/apps/web/src/components/InitiativeSidebar.logic.ts
 @@ -1,5 +1,6 @@
@@ -413,7 +413,7 @@ index a7949e0ce1..972c18661d 100644
        const allIds = initiativeMembers(group);
        for (const threadId of allIds) keys.add(`${environmentId}:${threadId}`);
 diff --git a/apps/web/src/components/InitiativeSidebar.tsx b/apps/web/src/components/InitiativeSidebar.tsx
-index 89f476d56e..ba633aed41 100644
+index 89f476d5..ba633aed 100644
 --- a/apps/web/src/components/InitiativeSidebar.tsx
 +++ b/apps/web/src/components/InitiativeSidebar.tsx
 @@ -1,3 +1,4 @@
@@ -465,7 +465,7 @@ index 89f476d56e..ba633aed41 100644
        key={`${editing.environmentId}:${editing.id}`}
        target={editing}
 diff --git a/apps/web/src/components/NewInitiativeThreadDialog.tsx b/apps/web/src/components/NewInitiativeThreadDialog.tsx
-index e4f0536f47..a5d95903b1 100644
+index e4f0536f..a5d95903 100644
 --- a/apps/web/src/components/NewInitiativeThreadDialog.tsx
 +++ b/apps/web/src/components/NewInitiativeThreadDialog.tsx
 @@ -1,3 +1,4 @@
@@ -581,7 +581,7 @@ index e4f0536f47..a5d95903b1 100644
      <Dialog
        open
 diff --git a/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx b/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
-index c1f6ef814c..1c948915a3 100644
+index c1f6ef81..1c948915 100644
 --- a/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
 +++ b/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
 @@ -18,9 +18,12 @@ import {
@@ -649,7 +649,7 @@ index c1f6ef814c..1c948915a3 100644
 +  expect(router.state.location.pathname).toBe(`/${ENVIRONMENT_ID}/${pm.id}`);
 +});
 diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
-index 1d9cf04a14..ed929629ef 100644
+index 1d9cf04a..ed929629 100644
 --- a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 +++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 @@ -96,6 +96,7 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
@@ -661,18 +661,18 @@ index 1d9cf04a14..ed929629ef 100644
          routing: {
            name: "Routing",
 diff --git a/apps/web/src/components/settings/LabsSettingsPanel.tsx b/apps/web/src/components/settings/LabsSettingsPanel.tsx
-index 38be7d6115..56aeb8a3a7 100644
+index 29343597..ba48c129 100644
 --- a/apps/web/src/components/settings/LabsSettingsPanel.tsx
 +++ b/apps/web/src/components/settings/LabsSettingsPanel.tsx
-@@ -17,6 +17,7 @@ import { firstManagedDenial, usePrimaryManagedPolicy } from "~/state/managedPoli
- export function LabsSettingsPanel() {
+@@ -19,6 +19,7 @@ export function LabsSettingsPanel() {
+   const gt = useGT();
    return (
      <SettingsPageContainer>
 +      <KpExperienceSection />
-       <SettingsSection id="beta" title="Beta">
+       <SettingsSection id="beta" title={gt("Beta")}>
          <BoringSidebarRow />
          {/* Clerk is only mounted when this build has T3 Connect. */}
-@@ -30,6 +31,42 @@ export function LabsSettingsPanel() {
+@@ -32,6 +33,42 @@ export function LabsSettingsPanel() {
    );
  }
  
@@ -713,15 +713,15 @@ index 38be7d6115..56aeb8a3a7 100644
 +}
 +
  function BoringSidebarRow() {
+   const searchableSetting = useSearchableSetting();
    const settings = useScopedSettings();
-   const updateSettings = useUpdateScopedSettings();
 diff --git a/apps/web/src/components/settings/settingsSearch.ts b/apps/web/src/components/settings/settingsSearch.ts
-index 937e37dd8e..34508ec662 100644
+index 51ac4d7e..cdab9d3a 100644
 --- a/apps/web/src/components/settings/settingsSearch.ts
 +++ b/apps/web/src/components/settings/settingsSearch.ts
-@@ -465,6 +465,12 @@ export const SETTINGS_SEARCH_ITEMS = [
+@@ -487,6 +487,12 @@ export const SETTINGS_SEARCH_ITEMS = [
      to: "/settings/general",
-     searchTerms: ["hide fold running monitoring threads inbox sidebar shelf"],
+     searchTerms: [msg("hide fold running monitoring threads inbox sidebar shelf")],
    },
 +  {
 +    id: "initiative-management",
@@ -731,9 +731,9 @@ index 937e37dd8e..34508ec662 100644
 +  },
    {
      id: "boring-sidebar",
-     title: "Boring sidebar (group by project)",
+     title: msg("Boring sidebar (group by project)"),
 diff --git a/apps/web/src/hooks/useInitiativeThreadActions.ts b/apps/web/src/hooks/useInitiativeThreadActions.ts
-index 4cc9efda7e..58c90410de 100644
+index 4cc9efda..58c90410 100644
 --- a/apps/web/src/hooks/useInitiativeThreadActions.ts
 +++ b/apps/web/src/hooks/useInitiativeThreadActions.ts
 @@ -1,5 +1,5 @@
@@ -754,10 +754,10 @@ index 4cc9efda7e..58c90410de 100644
      ? config
      : null;
 diff --git a/apps/web/test/fakeEnvironment.ts b/apps/web/test/fakeEnvironment.ts
-index cd781dcdb7..1a7d8c173b 100644
+index 14a148e4..8bc3f616 100644
 --- a/apps/web/test/fakeEnvironment.ts
 +++ b/apps/web/test/fakeEnvironment.ts
-@@ -419,7 +419,10 @@ let acceptCommands = false;
+@@ -428,7 +428,10 @@ let acceptCommands = false;
  let holdCommand: (command: OrchestrationV2Command) => boolean = () => false;
  let pendingDispatches: Array<{
    readonly command: OrchestrationV2Command;
@@ -769,19 +769,16 @@ index cd781dcdb7..1a7d8c173b 100644
  }> = [];
  let pendingAssetUrls: Array<Deferred.Deferred<AssetCreateUrlResult>> = [];
  let acceptSettingsUpdates = false;
-@@ -468,7 +471,10 @@ const handlers: Record<string, (input: never) => unknown> = {
-       dispatched.push(command);
-       if (acceptCommands && !holdCommand(command))
-         return Effect.succeed({ sequence: sequence + 1 });
+@@ -494,7 +497,7 @@ const handlers: Record<string, (input: never) => unknown> = {
+           thread: shellOf(fork),
+         }).pipe(Effect.as({ sequence }));
+       }
 -      const reply = Deferred.makeUnsafe<never, OrchestrationV2DispatchCommandError>();
-+      const reply = Deferred.makeUnsafe<
-+        { readonly sequence: number },
-+        OrchestrationV2DispatchCommandError
-+      >();
++      const reply = Deferred.makeUnsafe<{ readonly sequence: number }, OrchestrationV2DispatchCommandError>();
        pendingDispatches.push({ command, reply });
        return Deferred.await(reply);
      }),
-@@ -623,7 +629,10 @@ export function installFakeEnvironment(
+@@ -661,7 +664,10 @@ export function installFakeEnvironment(
        : { settings: { ...baseServerConfig.settings, ...options.settings } }),
      ...(options?.initiativeGroups === undefined
        ? {}
@@ -793,7 +790,7 @@ index cd781dcdb7..1a7d8c173b 100644
    };
    dispatched = [];
    acceptCommands = options?.acceptCommands === true;
-@@ -710,6 +719,24 @@ export function dispatchedCommands(): ReadonlyArray<OrchestrationV2Command> {
+@@ -748,6 +754,24 @@ export function dispatchedCommands(): ReadonlyArray<OrchestrationV2Command> {
    return dispatched;
  }
  
@@ -819,10 +816,10 @@ index cd781dcdb7..1a7d8c173b 100644
    return settingsWrites;
  }
 diff --git a/packages/contracts/src/server.ts b/packages/contracts/src/server.ts
-index 0d142330b2..c96c40d857 100644
+index eaccfa61..237f9b31 100644
 --- a/packages/contracts/src/server.ts
 +++ b/packages/contracts/src/server.ts
-@@ -714,7 +714,7 @@ export const ServerConfig = Schema.Struct({
+@@ -726,7 +726,7 @@ export const ServerConfig = Schema.Struct({
    shellThreadFamilies: Schema.optionalKey(Schema.Boolean),
    /** Persistent initiative display groups and native grouping tools. */
    initiativeGroups: Schema.optionalKey(Schema.Boolean),
@@ -832,10 +829,10 @@ index 0d142330b2..c96c40d857 100644
    /**
     * The shell can leave older settled threads out of snapshots (`omitOlderSettled`), and
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index c803b5cccf..6f87ed74b8 100644
+index ff2bf7e0..2ad6d402 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
-@@ -1397,7 +1397,9 @@ export const InitiativeChange = Schema.Union([
+@@ -1403,7 +1403,9 @@ export const InitiativeChange = Schema.Union([
  export type InitiativeChange = typeof InitiativeChange.Type;
  
  export const ServerSettings = Schema.Struct({
@@ -846,7 +843,7 @@ index c803b5cccf..6f87ed74b8 100644
    initiatives: Initiatives.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
    // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
    favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
-@@ -1803,7 +1805,7 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
+@@ -1815,7 +1817,7 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
  ) {
    override get message(): string {
      if (this.operation === "initiative-disabled")
@@ -855,7 +852,7 @@ index c803b5cccf..6f87ed74b8 100644
      if (this.operation === "write-managed-setting") {
        return `${this.managedSetting ?? "This setting"} is managed by ${this.managedBy ?? "your organization"} and cannot be changed.`;
      }
-@@ -1886,7 +1888,7 @@ export const ServerSettingsPatch = Schema.Struct({
+@@ -1898,7 +1900,7 @@ export const ServerSettingsPatch = Schema.Struct({
      }),
    ),
    worktreesDirectory: Schema.optionalKey(TrimmedString),
@@ -865,7 +862,7 @@ index c803b5cccf..6f87ed74b8 100644
    responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
    enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
 diff --git a/packages/shared/src/initiatives.test.ts b/packages/shared/src/initiatives.test.ts
-index b8f33ddc70..36a71e1c5f 100644
+index b8f33ddc..36a71e1c 100644
 --- a/packages/shared/src/initiatives.test.ts
 +++ b/packages/shared/src/initiatives.test.ts
 @@ -14,7 +14,7 @@ describe("initiative relationships", () => {
@@ -878,7 +875,7 @@ index b8f33ddc70..36a71e1c5f 100644
      };
      for (const threadId of [api, ui, api])
 diff --git a/packages/shared/src/initiatives.ts b/packages/shared/src/initiatives.ts
-index eb2e5018b7..fa36e120b2 100644
+index eb2e5018..fa36e120 100644
 --- a/packages/shared/src/initiatives.ts
 +++ b/packages/shared/src/initiatives.ts
 @@ -1,5 +1,22 @@
@@ -906,7 +903,7 @@ index eb2e5018b7..fa36e120b2 100644
    threadId: ThreadId,
 diff --git a/scripts/scenarios/kp-experience.e2e.ts b/scripts/scenarios/kp-experience.e2e.ts
 new file mode 100644
-index 0000000000..98015a4532
+index 00000000..98015a45
 --- /dev/null
 +++ b/scripts/scenarios/kp-experience.e2e.ts
 @@ -0,0 +1,68 @@
@@ -979,7 +976,7 @@ index 0000000000..98015a4532
 +  },
 +);
 diff --git a/scripts/scenarios/start-app.ts b/scripts/scenarios/start-app.ts
-index c2feae4098..585f527d26 100644
+index c2feae40..585f527d 100644
 --- a/scripts/scenarios/start-app.ts
 +++ b/scripts/scenarios/start-app.ts
 @@ -76,7 +76,7 @@ export const prepareHome = Effect.fn("startApp.prepareHome")(function* (home: st

@@ -1,5 +1,5 @@
 diff --git a/apps/server/src/initiatives.test.ts b/apps/server/src/initiatives.test.ts
-index cf30469085..e182040d95 100644
+index cf304690..e182040d 100644
 --- a/apps/server/src/initiatives.test.ts
 +++ b/apps/server/src/initiatives.test.ts
 @@ -8,6 +8,8 @@ it.effect(
@@ -44,7 +44,7 @@ index cf30469085..e182040d95 100644
      yield* settings.updateSettings({
        initiativeChange: {
 diff --git a/apps/server/src/initiatives.ts b/apps/server/src/initiatives.ts
-index fbb41f4a28..0cb0a7f8d5 100644
+index fbb41f4a..0cb0a7f8 100644
 --- a/apps/server/src/initiatives.ts
 +++ b/apps/server/src/initiatives.ts
 @@ -12,6 +12,7 @@ export const inheritInitiative = Effect.fn("initiatives.inherit")(function* (
@@ -82,10 +82,10 @@ index fbb41f4a28..0cb0a7f8d5 100644
    );
  });
 diff --git a/apps/server/src/mcp/OrchestratorMcpService.test.ts b/apps/server/src/mcp/OrchestratorMcpService.test.ts
-index f3c606acb7..31f5e1e9c1 100644
+index 0dfc31e3..5a28eca0 100644
 --- a/apps/server/src/mcp/OrchestratorMcpService.test.ts
 +++ b/apps/server/src/mcp/OrchestratorMcpService.test.ts
-@@ -2815,6 +2815,7 @@ describe("OrchestratorMcpService provider resolution", () => {
+@@ -3286,6 +3286,7 @@ describe("OrchestratorMcpService provider resolution", () => {
            { databaseLayer: layerDatabase, runEffectWorker: false },
          );
          const layerSettings = ServerSettings.layerTest({
@@ -94,7 +94,7 @@ index f3c606acb7..31f5e1e9c1 100644
              original: {
                name: "Original",
 diff --git a/apps/server/src/mcp/toolkits/initiatives.test.ts b/apps/server/src/mcp/toolkits/initiatives.test.ts
-index 2c3b8fa6cd..17645c4d22 100644
+index 2c3b8fa6..17645c4d 100644
 --- a/apps/server/src/mcp/toolkits/initiatives.test.ts
 +++ b/apps/server/src/mcp/toolkits/initiatives.test.ts
 @@ -79,7 +79,7 @@ const create = () =>
@@ -150,10 +150,10 @@ index 2c3b8fa6cd..17645c4d22 100644
 +  }).pipe(Effect.provide(layer));
 +});
 diff --git a/apps/server/src/mcp/toolkits/project/handlers.test.ts b/apps/server/src/mcp/toolkits/project/handlers.test.ts
-index 84e47f4cc8..9fc7690600 100644
+index 7562c3e2..258a4156 100644
 --- a/apps/server/src/mcp/toolkits/project/handlers.test.ts
 +++ b/apps/server/src/mcp/toolkits/project/handlers.test.ts
-@@ -440,6 +440,7 @@ it.effect("a launch retried with the same clientRequestId replays the first one"
+@@ -465,6 +465,7 @@ it.effect("a launch retried with the same clientRequestId replays the first one"
      });
      yield* Effect.gen(function* () {
        const settings = yield* ServerSettings.ServerSettingsService;
@@ -162,10 +162,10 @@ index 84e47f4cc8..9fc7690600 100644
          initiativeChange: {
            action: "create",
 diff --git a/apps/server/src/mcp/toolkits/thread/handlers.ts b/apps/server/src/mcp/toolkits/thread/handlers.ts
-index c6c24871eb..e1d6c1f832 100644
+index 387a8cb1..68bfefcb 100644
 --- a/apps/server/src/mcp/toolkits/thread/handlers.ts
 +++ b/apps/server/src/mcp/toolkits/thread/handlers.ts
-@@ -107,18 +107,26 @@ const writesThread = <P extends { readonly threadId?: ThreadId | undefined }, A,
+@@ -108,18 +108,26 @@ const writesThread = <P extends { readonly threadId?: ThreadId | undefined }, A,
    handle: (params: P) => Effect.Effect<A, E, R>,
  ) => McpToolAccess.writesThreads((params: P) => [params.threadId], handle);
  
@@ -198,10 +198,10 @@ index c6c24871eb..e1d6c1f832 100644
        if (change.action !== "create" && existing === undefined)
          return yield* new OrchestratorMcpFailure({
 diff --git a/apps/server/src/serverSettings.test.ts b/apps/server/src/serverSettings.test.ts
-index 1958ed3a74..4d131ba911 100644
+index ca5075f9..d02c62f7 100644
 --- a/apps/server/src/serverSettings.test.ts
 +++ b/apps/server/src/serverSettings.test.ts
-@@ -153,6 +153,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+@@ -155,6 +155,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
          config.settingsPath,
          JSON.stringify({
            projectSettingsFolded: true,
@@ -209,7 +209,7 @@ index 1958ed3a74..4d131ba911 100644
            responseStreamingMode: "turn",
            initiatives: groups,
          }),
-@@ -177,6 +178,20 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+@@ -179,6 +180,20 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
        assert.sameMembers([...saved.memberThreadIds], [pm, "api", "web"]);
        assert.equal(yield* fs.readFileString(config.settingsPath), settingsFile);
        assert.deepEqual(JSON.parse(yield* fs.readFileString(initiativesPath)).routing, saved);
@@ -230,7 +230,7 @@ index 1958ed3a74..4d131ba911 100644
      }).pipe(Effect.provide(layerServerSettings())),
    );
  
-@@ -308,7 +323,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
+@@ -310,7 +325,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
        const path = yield* Path.Path;
        const service = yield* ServerSettingsModule.ServerSettingsService;
        const initiativesPath = path.join(path.dirname(config.settingsPath), "initiatives.json");
@@ -241,10 +241,10 @@ index 1958ed3a74..4d131ba911 100644
        yield* fs.writeFileString(config.settingsPath, original);
        yield* fs.writeFileString(initiativesPath, JSON.stringify(groups));
 diff --git a/apps/server/src/serverSettings.ts b/apps/server/src/serverSettings.ts
-index c3900a3d24..23dbfd7b5e 100644
+index 366b0a43..90a9ff96 100644
 --- a/apps/server/src/serverSettings.ts
 +++ b/apps/server/src/serverSettings.ts
-@@ -202,6 +202,17 @@ export function applyProviderInstanceMutation(
+@@ -203,6 +203,17 @@ export function applyProviderInstanceMutation(
    return { ...settings, providerInstances };
  }
  
@@ -262,7 +262,7 @@ index c3900a3d24..23dbfd7b5e 100644
  const secretProviderConfigGuards = new Map(
    secretProviderDefinitions.definitions.map((definition) => [
      definition.kind as string,
-@@ -332,11 +343,14 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
+@@ -333,11 +344,14 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
      getSettings,
      updateSettings: (patch) =>
        updateTestSettings((currentSettings) =>
@@ -278,19 +278,19 @@ index c3900a3d24..23dbfd7b5e 100644
            yield* ensureProviderInstanceMutationAllowed(currentSettings, mutation, "test settings");
            const patched = applyServerSettingsPatch(currentSettings, patch);
            return applyProviderInstanceMutation(patched, mutation);
-@@ -1282,6 +1296,7 @@ const make = Effect.gen(function* () {
+@@ -1287,6 +1301,7 @@ const make = Effect.gen(function* () {
              cause: parseFailure.value,
            });
          }
 +        yield* ensureInitiativeWritesAllowed(current, patch, settingsPath);
          // An older client echoes a reference as the redacted marker; restore it before vetting so
          // a removed provider's reference is cleared below rather than restored by persistence.
-         const updated = withEchoedSecretReferences(current, yield* update(current));
+         const updated = withoutRedirectedSimlockTokens(
 diff --git a/apps/server/src/ws.ts b/apps/server/src/ws.ts
-index 8801d082f2..d7567de324 100644
+index 8a6fd149..e6cf1eb7 100644
 --- a/apps/server/src/ws.ts
 +++ b/apps/server/src/ws.ts
-@@ -1885,7 +1885,8 @@ export const layerWsRpc = (
+@@ -1901,7 +1901,8 @@ export const layerWsRpc = (
              : { managedPolicy: serverSettings.managedPolicy }),
            shellResumeCompletionMarker: true,
            shellThreadFamilies: true,
@@ -301,10 +301,10 @@ index 8801d082f2..d7567de324 100644
            shellOlderSettled: true,
            threadResumeCompletionMarker: true,
 diff --git a/packages/contracts/src/server.ts b/packages/contracts/src/server.ts
-index 95b3568ae2..0d142330b2 100644
+index 0f64e6ad..eaccfa61 100644
 --- a/packages/contracts/src/server.ts
 +++ b/packages/contracts/src/server.ts
-@@ -714,6 +714,7 @@ export const ServerConfig = Schema.Struct({
+@@ -726,6 +726,7 @@ export const ServerConfig = Schema.Struct({
    shellThreadFamilies: Schema.optionalKey(Schema.Boolean),
    /** Persistent initiative display groups and native grouping tools. */
    initiativeGroups: Schema.optionalKey(Schema.Boolean),
@@ -313,10 +313,10 @@ index 95b3568ae2..0d142330b2 100644
    /**
     * The shell can leave older settled threads out of snapshots (`omitOlderSettled`), and
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index 5b0f704387..c803b5cccf 100644
+index c0a05d0c..ff2bf7e0 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
-@@ -1397,6 +1397,7 @@ export const InitiativeChange = Schema.Union([
+@@ -1403,6 +1403,7 @@ export const InitiativeChange = Schema.Union([
  export type InitiativeChange = typeof InitiativeChange.Type;
  
  export const ServerSettings = Schema.Struct({
@@ -324,7 +324,7 @@ index 5b0f704387..c803b5cccf 100644
    initiatives: Initiatives.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
    // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
    favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
-@@ -1777,6 +1778,7 @@ export const ServerSettingsOperation = Schema.Literals([
+@@ -1789,6 +1790,7 @@ export const ServerSettingsOperation = Schema.Literals([
    "prepare-directory",
    "write-managed-setting",
    "use-disallowed-provider",
@@ -332,7 +332,7 @@ index 5b0f704387..c803b5cccf 100644
  ]);
  export type ServerSettingsOperation = typeof ServerSettingsOperation.Type;
  
-@@ -1800,6 +1802,8 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
+@@ -1812,6 +1814,8 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
    },
  ) {
    override get message(): string {
@@ -341,7 +341,7 @@ index 5b0f704387..c803b5cccf 100644
      if (this.operation === "write-managed-setting") {
        return `${this.managedSetting ?? "This setting"} is managed by ${this.managedBy ?? "your organization"} and cannot be changed.`;
      }
-@@ -1882,6 +1886,7 @@ export const ServerSettingsPatch = Schema.Struct({
+@@ -1894,6 +1898,7 @@ export const ServerSettingsPatch = Schema.Struct({
      }),
    ),
    worktreesDirectory: Schema.optionalKey(TrimmedString),
@@ -350,7 +350,7 @@ index 5b0f704387..c803b5cccf 100644
    responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
    enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
 diff --git a/packages/shared/src/initiatives.test.ts b/packages/shared/src/initiatives.test.ts
-index 80e688df4c..b8f33ddc70 100644
+index 80e688df..b8f33ddc 100644
 --- a/packages/shared/src/initiatives.test.ts
 +++ b/packages/shared/src/initiatives.test.ts
 @@ -12,7 +12,11 @@ const initial = (): Initiatives =>
@@ -367,7 +367,7 @@ index 80e688df4c..b8f33ddc70 100644
        settings = applyServerSettingsPatch(settings, {
          initiativeChange: { action: "assign", id: "routing", threadId },
 diff --git a/scripts/scenarios/start-app.ts b/scripts/scenarios/start-app.ts
-index c22d692528..c2feae4098 100644
+index c22d6925..c2feae40 100644
 --- a/scripts/scenarios/start-app.ts
 +++ b/scripts/scenarios/start-app.ts
 @@ -76,6 +76,7 @@ export const prepareHome = Effect.fn("startApp.prepareHome")(function* (home: st

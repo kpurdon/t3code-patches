@@ -9,6 +9,7 @@
         "packages/shared/src/initiatives.test.ts",
         "packages/shared/src/serverSettings.test.ts",
         "apps/server/src/initiatives.test.ts",
+        "apps/server/src/auth/RpcAuthorization.test.ts",
         "apps/server/src/mcp/toolkits/initiatives.test.ts",
         "apps/server/src/mcp/toolkits/core.test.ts",
         "apps/server/src/mcp/toolkits/project/handlers.test.ts",
