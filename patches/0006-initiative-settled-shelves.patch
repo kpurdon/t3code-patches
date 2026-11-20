@@ -1,5 +1,5 @@
 diff --git a/apps/web/src/components/InitiativeSidebar.browser.test.tsx b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
-index ea36a795c6..d2ded2d729 100644
+index ea36a795..d2ded2d7 100644
 --- a/apps/web/src/components/InitiativeSidebar.browser.test.tsx
 +++ b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
 @@ -6,10 +6,12 @@ import {
@@ -66,7 +66,7 @@ index ea36a795c6..d2ded2d729 100644
    expect(threads[1]?.settledOverride).toBe("settled");
    expect(state.changes.map((change) => change.action)).toEqual([
 diff --git a/apps/web/src/components/InitiativeSidebar.logic.test.ts b/apps/web/src/components/InitiativeSidebar.logic.test.ts
-index 9c8033494f..14a6e3345b 100644
+index 9c803349..14a6e334 100644
 --- a/apps/web/src/components/InitiativeSidebar.logic.test.ts
 +++ b/apps/web/src/components/InitiativeSidebar.logic.test.ts
 @@ -26,11 +26,11 @@ it("keeps the coordinator first and accounts for every member including unloaded
@@ -143,7 +143,7 @@ index 9c8033494f..14a6e3345b 100644
    expect(scoped.groups[1]?.hidden).toBe(true);
  });
 diff --git a/apps/web/src/components/InitiativeSidebar.logic.ts b/apps/web/src/components/InitiativeSidebar.logic.ts
-index 1ddc9811b8..a7949e0ce1 100644
+index 1ddc9811..a7949e0c 100644
 --- a/apps/web/src/components/InitiativeSidebar.logic.ts
 +++ b/apps/web/src/components/InitiativeSidebar.logic.ts
 @@ -15,13 +15,25 @@ export function initiativeStatusCounts(
@@ -240,7 +240,7 @@ index 1ddc9811b8..a7949e0ce1 100644
    }
    return { groups, keys, visibleThreads, memberThreads };
 diff --git a/apps/web/src/components/InitiativeSidebar.tsx b/apps/web/src/components/InitiativeSidebar.tsx
-index 4f0c892418..89f476d56e 100644
+index 4f0c8924..89f476d5 100644
 --- a/apps/web/src/components/InitiativeSidebar.tsx
 +++ b/apps/web/src/components/InitiativeSidebar.tsx
 @@ -15,6 +15,7 @@ import { threadFamilies } from "../state/threads";
@@ -404,7 +404,7 @@ index 4f0c892418..89f476d56e 100644
                Add a project manager and execution sessions.
              </li>
 diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
-index 5b48a613a0..1d9cf04a14 100644
+index 5b48a613..1d9cf04a 100644
 --- a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 +++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 @@ -71,7 +71,8 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
@@ -512,10 +512,10 @@ index 5b48a613a0..1d9cf04a14 100644
      expect(savedServerSettings().initiatives.other?.memberThreadIds).not.toContain(flat.id),
    );
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index 94af06d445..52fa711259 100644
+index e6bcb943..41cdaed8 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
-@@ -487,11 +487,18 @@ function useSidebarThreads(input: {
+@@ -496,11 +496,18 @@ function useSidebarThreads(input: {
      [] as readonly string[],
      INITIATIVE_COLLAPSED_SCHEMA,
    );
@@ -534,7 +534,7 @@ index 94af06d445..52fa711259 100644
    );
    const partition = partitionSidebarThreads({
      threads: threads.filter((thread) => !initiatives.keys.has(threadShellKey(thread))),
-@@ -561,7 +568,6 @@ function useSidebarThreads(input: {
+@@ -570,7 +577,6 @@ function useSidebarThreads(input: {
            };
          });
    const orderedThreads = [
@@ -542,7 +542,7 @@ index 94af06d445..52fa711259 100644
      ...pinnedThreads,
      ...(projectFolders === null
        ? activeThreads
-@@ -569,6 +575,7 @@ function useSidebarThreads(input: {
+@@ -578,6 +584,7 @@ function useSidebarThreads(input: {
      ...visibleWorkingThreads,
      ...visibleSnoozedThreads,
      ...renderedSettledThreads,
@@ -550,7 +550,7 @@ index 94af06d445..52fa711259 100644
    ];
    const sectionByThreadKey = new Map<string, SidebarSection>();
    for (const [list, section] of [
-@@ -627,7 +634,12 @@ function useSidebarThreads(input: {
+@@ -636,7 +643,12 @@ function useSidebarThreads(input: {
      visibleWorkingThreads,
      orderedThreadKeys: orderedThreads.map(threadShellKey),
      threadByKey: new Map(orderedThreads.map((thread) => [threadShellKey(thread), thread] as const)),
@@ -564,7 +564,7 @@ index 94af06d445..52fa711259 100644
      snoozedThreadKeys: new Set(snoozedThreads.map(threadShellKey)),
      sectionByThreadKey,
      pinnedKeys: pinnedThreads.map(threadShellKey),
-@@ -3694,7 +3706,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3793,7 +3805,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                          ) : null,
                        );
                        if (showOtherSessions) {
@@ -573,7 +573,7 @@ index 94af06d445..52fa711259 100644
                            <li
                              key="other-sessions"
                              data-testid="sidebar-ungrouped-threads"
-@@ -3706,7 +3718,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3805,7 +3817,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            </li>,
                          );
                        } else if (!hasVisibleInitiatives || from !== null) {
@@ -583,7 +583,7 @@ index 94af06d445..52fa711259 100644
                        return items;
                      })()}
 diff --git a/apps/web/src/components/threadActionMenu.logic.test.ts b/apps/web/src/components/threadActionMenu.logic.test.ts
-index d2a3bff9bf..8b8e166dbd 100644
+index 9d77d376..0f7cdd69 100644
 --- a/apps/web/src/components/threadActionMenu.logic.test.ts
 +++ b/apps/web/src/components/threadActionMenu.logic.test.ts
 @@ -36,14 +36,21 @@ describe("buildThreadActionMenuItems", () => {
@@ -644,18 +644,18 @@ index d2a3bff9bf..8b8e166dbd 100644
        buildThreadActionMenuItems(baseState).some((item) => item.id.startsWith("initiative:")),
      ).toBe(false);
 diff --git a/apps/web/src/components/threadActionMenu.logic.ts b/apps/web/src/components/threadActionMenu.logic.ts
-index 4fc92edaf0..0b37a7fdb1 100644
+index 157048ab..75d55cbb 100644
 --- a/apps/web/src/components/threadActionMenu.logic.ts
 +++ b/apps/web/src/components/threadActionMenu.logic.ts
-@@ -2,6 +2,7 @@ import type { ContextMenuItem } from "@t3tools/contracts";
- import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
+@@ -5,6 +5,7 @@ import { msg } from "gt-react";
+ import { m, type MessageResolver } from "../i18n/messages";
  
  export type ThreadActionMenuId =
 +  | "initiative:menu"
    | "initiative:start"
    | "initiative:assign"
    | `initiative:assign:${string}`
-@@ -130,30 +131,37 @@ export function buildThreadActionMenuItems(
+@@ -159,30 +160,37 @@ export function buildThreadActionMenuItems(
    const items: ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> = [
      ...(state.initiative
        ? [
@@ -716,7 +716,7 @@ index 4fc92edaf0..0b37a7fdb1 100644
      ...(state.canFind
 diff --git a/scripts/scenarios/initiative-settled.e2e.ts b/scripts/scenarios/initiative-settled.e2e.ts
 new file mode 100644
-index 0000000000..f352ddbc98
+index 00000000..f352ddbc
 --- /dev/null
 +++ b/scripts/scenarios/initiative-settled.e2e.ts
 @@ -0,0 +1,59 @@

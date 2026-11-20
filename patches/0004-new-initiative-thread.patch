@@ -1,5 +1,5 @@
 diff --git a/apps/web/src/components/InitiativeSidebar.browser.test.tsx b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
-index 2da2f6a319..ea36a795c6 100644
+index 2da2f6a3..ea36a795 100644
 --- a/apps/web/src/components/InitiativeSidebar.browser.test.tsx
 +++ b/apps/web/src/components/InitiativeSidebar.browser.test.tsx
 @@ -58,8 +58,9 @@ vi.mock(import("../hooks/useSettings"), () => ({
@@ -38,7 +38,7 @@ index 2da2f6a319..ea36a795c6 100644
        threads={threads}
        groups={
 diff --git a/apps/web/src/components/InitiativeSidebar.logic.test.ts b/apps/web/src/components/InitiativeSidebar.logic.test.ts
-index ae2eab766f..9c8033494f 100644
+index ae2eab76..9c803349 100644
 --- a/apps/web/src/components/InitiativeSidebar.logic.test.ts
 +++ b/apps/web/src/components/InitiativeSidebar.logic.test.ts
 @@ -1,7 +1,12 @@
@@ -71,7 +71,7 @@ index ae2eab766f..9c8033494f 100644
      "1 needs you · 1 working · 1 idle or done · 1 not loaded",
    );
 diff --git a/apps/web/src/components/InitiativeSidebar.logic.ts b/apps/web/src/components/InitiativeSidebar.logic.ts
-index 2f725aade2..1ddc9811b8 100644
+index 2f725aad..1ddc9811 100644
 --- a/apps/web/src/components/InitiativeSidebar.logic.ts
 +++ b/apps/web/src/components/InitiativeSidebar.logic.ts
 @@ -11,10 +11,10 @@ export function initiativeMembers(group: Initiative): readonly ThreadId[] {
@@ -123,7 +123,7 @@ index 2f725aade2..1ddc9811b8 100644
    );
  }
 diff --git a/apps/web/src/components/InitiativeSidebar.tsx b/apps/web/src/components/InitiativeSidebar.tsx
-index 49883665e0..4f0c892418 100644
+index 49883665..4f0c8924 100644
 --- a/apps/web/src/components/InitiativeSidebar.tsx
 +++ b/apps/web/src/components/InitiativeSidebar.tsx
 @@ -5,18 +5,17 @@ import {
@@ -334,7 +334,7 @@ index 49883665e0..4f0c892418 100644
  }
 diff --git a/apps/web/src/components/NewInitiativeThreadDialog.tsx b/apps/web/src/components/NewInitiativeThreadDialog.tsx
 new file mode 100644
-index 0000000000..e4f0536f47
+index 00000000..e4f0536f
 --- /dev/null
 +++ b/apps/web/src/components/NewInitiativeThreadDialog.tsx
 @@ -0,0 +1,309 @@
@@ -649,7 +649,7 @@ index 0000000000..e4f0536f47
 +}
 diff --git a/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx b/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
 new file mode 100644
-index 0000000000..c1f6ef814c
+index 00000000..c1f6ef81
 --- /dev/null
 +++ b/apps/web/src/components/Sidebar.initiativeCreation.browser.test.tsx
 @@ -0,0 +1,115 @@
@@ -769,7 +769,7 @@ index 0000000000..c1f6ef814c
 +  expect(JSON.parse(localStorage.getItem("t3code:initiatives:collapsed")!)).toEqual([]);
 +});
 diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
-index 2cd1fec66a..5b48a613a0 100644
+index 2cd1fec6..5b48a613 100644
 --- a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 +++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
 @@ -113,6 +113,8 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
@@ -782,10 +782,13 @@ index 2cd1fec66a..5b48a613a0 100644
    await expect
      .element(page.getByTestId("sidebar-settled-shelf-toggle"))
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index 49e3bc0cae..bbdf62a816 100644
+index 06e4e74b..e6bcb943 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
-@@ -1,4 +1,6 @@
+@@ -1,7 +1,9 @@
+ import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
+ import { msg, T, useGT, useMessages } from "gt-react";
+ import { m } from "../i18n/messages";
 -import { InitiativeSidebar } from "./InitiativeSidebar";
 +import { NewInitiativeButton, NewInitiativeThreadDialog } from "./NewInitiativeThreadDialog";
 +import type { InitiativeSidebarGroup } from "./InitiativeSidebar.logic";
@@ -793,7 +796,7 @@ index 49e3bc0cae..bbdf62a816 100644
  import { initiativeLayout } from "./InitiativeSidebar.logic";
  import { attachSidebarTree } from "../lib/sidebarTree";
  import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
-@@ -1043,6 +1045,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -1053,6 +1055,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
    const highlightedProjectScopeKeyRef = useRef<string | null>(null);
    // Hold dropped rows until server placement is confirmed; block another pickup from replacing the hold.
    const [optimisticDrop, setOptimisticDrop] = useState<SidebarOptimisticDrop | null>(null);
@@ -803,7 +806,7 @@ index 49e3bc0cae..bbdf62a816 100644
    const threadSearchInputRef = useRef<HTMLInputElement>(null);
    const [threadSearchQuery, setThreadSearchQuery] = useState("");
    const [searchHighlightKey, setSearchHighlightKey] = useState<string | null>(null);
-@@ -3205,6 +3210,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3245,6 +3250,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                    </ComboboxPopup>
                  </Combobox>
                }
@@ -811,7 +814,7 @@ index 49e3bc0cae..bbdf62a816 100644
                onNewProject={openAddProjectCommandPalette}
                onNewThread={handleNewThreadClick}
                newThreadDisabled={projects.length === 0}
-@@ -3390,6 +3396,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3443,6 +3449,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                      )}
                    >
                      {(() => {
@@ -829,7 +832,7 @@ index 49e3bc0cae..bbdf62a816 100644
                        const renderThreadRow = (
                          thread: EnvironmentThreadShell,
                          section: SidebarSection,
-@@ -3406,9 +3423,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3459,9 +3476,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            ? folderRowsMultiline
                              ? "folder-multiline"
                              : "folder"
@@ -844,7 +847,7 @@ index 49e3bc0cae..bbdf62a816 100644
                          return (
                            <SortableThreadRow
                              key={threadKey}
-@@ -3514,7 +3533,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3569,7 +3588,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                          );
                        };
                        const from = isContextDrag ? null : (dragState?.activeSection ?? null);
@@ -853,7 +856,7 @@ index 49e3bc0cae..bbdf62a816 100644
                          <SidebarDraftBlock
                            key="draft-sessions"
                            projectByKey={projectByKey}
-@@ -3525,8 +3544,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3580,8 +3599,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            onDraftContextMenu={handleDraftContextMenu}
                          />,
                        ];
@@ -864,7 +867,7 @@ index 49e3bc0cae..bbdf62a816 100644
                            key="initiatives"
                            threads={threads}
                            groups={initiatives.groups}
-@@ -3542,17 +3562,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3597,17 +3617,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              navigateToThread(scopeThreadRef(environmentId, id))
                            }
                          />,
@@ -887,7 +890,7 @@ index 49e3bc0cae..bbdf62a816 100644
                                <SidebarProjectFolderHeader
                                  key={`project-folder:${folder.group.projectKey}`}
                                  group={folder.group}
-@@ -3564,7 +3586,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3619,7 +3641,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                />,
                              );
                              for (const thread of folder.threads) {
@@ -896,7 +899,7 @@ index 49e3bc0cae..bbdf62a816 100644
                                  renderThreadRow(
                                    thread,
                                    "active",
-@@ -3577,7 +3599,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3632,7 +3654,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                          }
                          switch (item.marker) {
                            case "pinned-header":
@@ -905,7 +908,7 @@ index 49e3bc0cae..bbdf62a816 100644
                                <SidebarDragBoundary
                                  key="pinned-header"
                                  marker="pinned-header"
-@@ -3588,7 +3610,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3643,7 +3665,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "pinned-divider":
@@ -914,7 +917,7 @@ index 49e3bc0cae..bbdf62a816 100644
                                <SidebarDragBoundary
                                  key="pinned-divider"
                                  marker="pinned-divider"
-@@ -3599,7 +3621,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3654,7 +3676,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "active-placeholder":
@@ -923,7 +926,7 @@ index 49e3bc0cae..bbdf62a816 100644
                                <SidebarSectionPlaceholder
                                  key="active-placeholder"
                                  marker="active-placeholder"
-@@ -3617,11 +3639,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3672,11 +3694,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "working-header":
@@ -934,10 +937,10 @@ index 49e3bc0cae..bbdf62a816 100644
                                  marker="working-header"
 -                                className="mt-auto"
 +                                className={cn(!showOtherSessions && "mt-auto")}
-                                 label="Working"
+                                 label={gt("Working", { $context: "sidebar section" })}
                                  count={workingThreads.length}
                                  toggle={{
-@@ -3632,11 +3654,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3687,11 +3709,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "snoozed-header":
@@ -950,10 +953,10 @@ index 49e3bc0cae..bbdf62a816 100644
 +                                className={cn(
 +                                  !showOtherSessions && workingThreads.length === 0 && "mt-auto",
 +                                )}
-                                 label="Snoozed"
+                                 label={gt("Snoozed", { $context: "sidebar section" })}
                                  count={snoozedThreads.length}
                                  toggle={{
-@@ -3647,12 +3671,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3702,12 +3726,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "settled-header":
@@ -968,9 +971,9 @@ index 49e3bc0cae..bbdf62a816 100644
 +                                    workingThreads.length + snoozedThreads.length === 0 &&
 +                                    "mt-auto",
                                  )}
-                                 label="Settled"
+                                 label={gt("Settled", { $context: "sidebar section" })}
                                  count={settledCount}
-@@ -3666,7 +3692,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3721,7 +3747,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "settled-placeholder":
@@ -979,7 +982,7 @@ index 49e3bc0cae..bbdf62a816 100644
                                <SidebarSectionPlaceholder
                                  key="settled-placeholder"
                                  marker="settled-placeholder"
-@@ -3685,32 +3711,49 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3740,37 +3766,49 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              break;
                          }
                        }
@@ -1043,17 +1046,22 @@ index 49e3bc0cae..bbdf62a816 100644
 -                          {/* Plus means "add", so revealing more uses a chevron. */}
 -                          <ChevronDownIcon aria-hidden className="size-4 shrink-0" />
 -                          {olderSettledShelf.loading
--                            ? "Loading"
+-                            ? gt("Loading")
 -                            : olderSettledShelf.failed
--                              ? "Could not load older threads. Retry"
--                              : `Show ${Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more`}
+-                              ? gt("Could not load older threads. Retry")
+-                              : gt(
+-                                  "{count, plural, one {Show {count} more} other {Show {count} more}}",
+-                                  {
+-                                    count: Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT),
+-                                  },
+-                                )}
 -                        </button>
 -                      </li>
 -                    ) : null}
                    </ul>
                  </SortableContext>
                </DndContext>
-@@ -3718,6 +3761,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3778,6 +3816,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
            ) : null}
          </SidebarGroup>
        </SidebarContent>
@@ -1069,10 +1077,10 @@ index 49e3bc0cae..bbdf62a816 100644
      </SidebarFolderDrop>
    );
 diff --git a/apps/web/src/components/sidebar/SidebarThreadHeader.tsx b/apps/web/src/components/sidebar/SidebarThreadHeader.tsx
-index e400e03d27..8457d13644 100644
+index 85836a5e..fc5b2f8a 100644
 --- a/apps/web/src/components/sidebar/SidebarThreadHeader.tsx
 +++ b/apps/web/src/components/sidebar/SidebarThreadHeader.tsx
-@@ -15,6 +15,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+@@ -16,6 +16,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
  export interface SidebarThreadHeaderProps {
    hasProjects: boolean;
    projectScope: ReactNode;
@@ -1080,7 +1088,7 @@ index e400e03d27..8457d13644 100644
    onNewProject: () => void;
    onNewThread: (event: ReactMouseEvent) => void;
    newThreadDisabled: boolean;
-@@ -34,6 +35,7 @@ export interface SidebarThreadHeaderProps {
+@@ -35,6 +36,7 @@ export interface SidebarThreadHeaderProps {
  export function SidebarThreadHeader({
    hasProjects,
    projectScope,
@@ -1088,19 +1096,19 @@ index e400e03d27..8457d13644 100644
    onNewProject,
    onNewThread,
    newThreadDisabled,
-@@ -105,6 +107,7 @@ export function SidebarThreadHeader({
+@@ -107,6 +109,7 @@ export function SidebarThreadHeader({
              </SidebarHeaderIconButton>
            </>
          ) : null}
 +        {newInitiativeAction}
          <SidebarHeaderIconButton
-           label="New thread"
+           label={gt("New thread")}
            tooltip={
 diff --git a/apps/web/src/composerDraftStore.ts b/apps/web/src/composerDraftStore.ts
-index 4066715c53..6f9b8ab406 100644
+index 3c64aa0f..c74b8026 100644
 --- a/apps/web/src/composerDraftStore.ts
 +++ b/apps/web/src/composerDraftStore.ts
-@@ -4675,12 +4675,37 @@ export function useComposerDraftModelState(
+@@ -4696,12 +4696,37 @@ export function useComposerDraftModelState(
    );
  }
  
@@ -1140,7 +1148,7 @@ index 4066715c53..6f9b8ab406 100644
      ),
    );
 diff --git a/apps/web/src/hooks/useHandleNewThread.ts b/apps/web/src/hooks/useHandleNewThread.ts
-index 9fae031953..8618e6db31 100644
+index 49e88126..c0144424 100644
 --- a/apps/web/src/hooks/useHandleNewThread.ts
 +++ b/apps/web/src/hooks/useHandleNewThread.ts
 @@ -3,7 +3,12 @@ import {
@@ -1252,10 +1260,10 @@ index 9fae031953..8618e6db31 100644
        ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
        : scopedProjectKey(projectRef);
 diff --git a/apps/web/test/fakeEnvironment.ts b/apps/web/test/fakeEnvironment.ts
-index 8d92a790b1..cd781dcdb7 100644
+index 8dc0c44f..14a148e4 100644
 --- a/apps/web/test/fakeEnvironment.ts
 +++ b/apps/web/test/fakeEnvironment.ts
-@@ -423,6 +423,7 @@ let pendingDispatches: Array<{
+@@ -432,6 +432,7 @@ let pendingDispatches: Array<{
  }> = [];
  let pendingAssetUrls: Array<Deferred.Deferred<AssetCreateUrlResult>> = [];
  let acceptSettingsUpdates = false;
@@ -1263,7 +1271,7 @@ index 8d92a790b1..cd781dcdb7 100644
  let settingsWrites: ServerSettingsPatch[] = [];
  const configSubscribers = new Set<Queue.Queue<ServerConfigStreamEvent>>();
  let sequence = 1;
-@@ -446,6 +447,13 @@ const handlers: Record<string, (input: never) => unknown> = {
+@@ -455,6 +456,13 @@ const handlers: Record<string, (input: never) => unknown> = {
      Effect.gen(function* () {
        if (!acceptSettingsUpdates) return yield* Effect.never;
        settingsWrites.push(patch);
@@ -1277,7 +1285,7 @@ index 8d92a790b1..cd781dcdb7 100644
        const settings = applyServerSettingsPatch(serverConfig().settings, patch);
        configOverrides = { ...configOverrides, settings };
        yield* Effect.forEach(configSubscribers, (queue) =>
-@@ -593,6 +601,7 @@ export function installFakeEnvironment(
+@@ -628,6 +636,7 @@ export function installFakeEnvironment(
    options?: {
      readonly acceptCommands?: boolean;
      readonly acceptSettingsUpdates?: boolean;
@@ -1285,7 +1293,7 @@ index 8d92a790b1..cd781dcdb7 100644
      readonly settings?: Partial<ServerConfig["settings"]>;
      readonly initiativeGroups?: boolean;
      readonly projects?: ReadonlyArray<OrchestrationProjectShell>;
-@@ -628,6 +637,7 @@ export function installFakeEnvironment(
+@@ -666,6 +675,7 @@ export function installFakeEnvironment(
    ];
    holdCommand = options?.holdCommand ?? (() => false);
    acceptSettingsUpdates = options?.acceptSettingsUpdates === true;
@@ -1294,7 +1302,7 @@ index 8d92a790b1..cd781dcdb7 100644
    globalThis.fetch = async (input, init) => {
      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
 diff --git a/scripts/scenarios/initiative-save.e2e.ts b/scripts/scenarios/initiative-save.e2e.ts
-index 19b445a163..b54598b6bc 100644
+index 19b445a1..b54598b6 100644
 --- a/scripts/scenarios/initiative-save.e2e.ts
 +++ b/scripts/scenarios/initiative-save.e2e.ts
 @@ -25,5 +25,37 @@ test(

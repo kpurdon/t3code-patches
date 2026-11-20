@@ -1,8 +1,8 @@
 diff --git a/apps/server/src/serverSettings.test.ts b/apps/server/src/serverSettings.test.ts
-index 347b43dd6f..8ba97ef3be 100644
+index f837fd8c..ca5075f9 100644
 --- a/apps/server/src/serverSettings.test.ts
 +++ b/apps/server/src/serverSettings.test.ts
-@@ -2,6 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+@@ -3,6 +3,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
  import * as NodeServices from "@effect/platform-node/NodeServices";
  import {
    DEFAULT_SERVER_SETTINGS,
@@ -10,7 +10,7 @@ index 347b43dd6f..8ba97ef3be 100644
    globalIdleCompaction,
    type ManagedPolicyDocument,
    ModelSelection,
-@@ -136,6 +137,195 @@ function strictSecretReferencePaths(
+@@ -139,6 +140,195 @@ function strictSecretReferencePaths(
  }
  
  it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings", (it) => {
@@ -207,7 +207,7 @@ index 347b43dd6f..8ba97ef3be 100644
      Effect.gen(function* () {
        const service = yield* ServerSettingsModule.ServerSettingsService;
 diff --git a/apps/server/src/serverSettings.ts b/apps/server/src/serverSettings.ts
-index 251becba12..a9eda8e731 100644
+index 66f0595a..366b0a43 100644
 --- a/apps/server/src/serverSettings.ts
 +++ b/apps/server/src/serverSettings.ts
 @@ -1,5 +1,6 @@
@@ -225,7 +225,7 @@ index 251becba12..a9eda8e731 100644
  import * as SqlClient from "effect/sql/SqlClient";
  import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
  import { resolveSymlinkTarget } from "@t3tools/shared/symlink";
-@@ -76,8 +78,12 @@ export {
+@@ -77,8 +79,12 @@ export {
  } from "@t3tools/shared/serverSettings";
  
  const encodeServerSettings = Schema.encodeEffect(ServerSettings);
@@ -239,7 +239,7 @@ index 251becba12..a9eda8e731 100644
  
  const textEncoder = new TextEncoder();
  const textDecoder = new TextDecoder();
-@@ -671,6 +677,7 @@ const make = Effect.gen(function* () {
+@@ -672,6 +678,7 @@ const make = Effect.gen(function* () {
    const { settingsPath } = yield* ServerConfig.ServerConfig;
    const fs = yield* FileSystem.FileSystem;
    const pathService = yield* Path.Path;
@@ -247,7 +247,7 @@ index 251becba12..a9eda8e731 100644
    const secretStore = yield* ServerSecretStore.ServerSecretStore;
    const sql = yield* SqlClient.SqlClient;
    const {
-@@ -753,6 +760,58 @@ const make = Effect.gen(function* () {
+@@ -754,6 +761,58 @@ const make = Effect.gen(function* () {
      ),
    );
  
@@ -306,7 +306,7 @@ index 251becba12..a9eda8e731 100644
    const moveInlineSettingsSecrets = Effect.fn("serverSettings.moveInlineSettingsSecrets")(
      function* (settings: ServerSettings) {
        const pending: SettingsSecret[] = [];
-@@ -784,17 +843,30 @@ const make = Effect.gen(function* () {
+@@ -785,17 +844,30 @@ const make = Effect.gen(function* () {
    );
  
    const loadSettingsFromDisk = Effect.gen(function* () {
@@ -338,7 +338,7 @@ index 251becba12..a9eda8e731 100644
        const legacySettings = decodeLegacyProviderSettingsJsonExit(raw);
        if (legacySettings._tag === "Success") {
          legacyProviders = legacySettings.value.providers;
-@@ -817,8 +889,19 @@ const make = Effect.gen(function* () {
+@@ -822,8 +894,19 @@ const make = Effect.gen(function* () {
          }
        } else {
          settings = decoded.value;
@@ -358,7 +358,7 @@ index 251becba12..a9eda8e731 100644
      // Settings saved by a server that kept the mode in `compactIdleThreads` move
      // it to `idleCompaction`, so that switch goes to clients as a boolean. The
      // defaults gain the field too, which tells clients this server reads modes.
-@@ -916,7 +999,8 @@ const make = Effect.gen(function* () {
+@@ -921,7 +1004,8 @@ const make = Effect.gen(function* () {
      if (
        migrated !== loaded ||
        (settingsFileTrusted && legacyProviders !== undefined) ||
@@ -368,7 +368,7 @@ index 251becba12..a9eda8e731 100644
      ) {
        yield* writeSettingsAtomically(migrated);
        for (const move of sourceControlMigration.secretMoves) {
-@@ -1186,6 +1270,7 @@ const make = Effect.gen(function* () {
+@@ -1191,6 +1275,7 @@ const make = Effect.gen(function* () {
    const updateAndPersistSettings = (
      patch: ServerSettingsPatch,
      update: (current: ServerSettings) => Effect.Effect<ServerSettings, ServerSettingsError>,
@@ -376,7 +376,7 @@ index 251becba12..a9eda8e731 100644
    ): Effect.Effect<ServerSettings, ServerSettingsError> =>
      writeSemaphore.withPermits(1)(
        Effect.gen(function* () {
-@@ -1243,7 +1328,9 @@ const make = Effect.gen(function* () {
+@@ -1251,7 +1336,9 @@ const make = Effect.gen(function* () {
                yield* rollbackSecretChanges;
                return yield* Effect.failCause(materializedExit.cause);
              }
@@ -387,79 +387,44 @@ index 251becba12..a9eda8e731 100644
              if (Exit.isFailure(writeExit)) {
                yield* rollbackSecretChanges;
                return yield* Effect.failCause(writeExit.cause);
-@@ -1302,37 +1389,43 @@ const make = Effect.gen(function* () {
+@@ -1351,12 +1438,13 @@ const make = Effect.gen(function* () {
      const revalidateAndEmitSafely = revalidateAndEmit.pipe(Effect.ignoreCause({ log: true }));
  
      // Watch symlink targets' directories for rewrites; re-resolve link changes to follow repointing.
--    const watchLinkTarget = Effect.gen(function* () {
++    const watchSettingsFile = Effect.fn("serverSettings.watchSettingsFile")(function* (filePath: string) {
+     const watchLinkTarget = Effect.gen(function* () {
 -      const linkTargetPath = yield* resolveSymlinkTarget(settingsPath).pipe(
--        Effect.provideService(FileSystem.FileSystem, fs),
--        Effect.provideService(Path.Path, pathService),
--      );
++      const linkTargetPath = yield* resolveSymlinkTarget(filePath).pipe(
+         Effect.provideService(FileSystem.FileSystem, fs),
+         Effect.provideService(Path.Path, pathService),
+       );
 -      if (linkTargetPath === pathService.resolve(settingsPath)) {
--        return Option.none<string>();
--      }
--      yield* fs
--        .makeDirectory(pathService.dirname(linkTargetPath), { recursive: true })
--        .pipe(Effect.ignore({ log: true }));
--      return Option.some(linkTargetPath);
--    }).pipe(Effect.orElseSucceed(() => Option.none<string>()));
--
--    const initialLinkTarget = yield* watchLinkTarget;
--    const linkTargetEvents = Stream.make(initialLinkTarget).pipe(
--      Stream.concat(watchFileChanges(settingsPath).pipe(Stream.mapEffect(() => watchLinkTarget))),
--      Stream.changes,
--      Stream.switchMap(
--        Option.match({
--          onNone: () => Stream.empty,
--          onSome: (linkTargetPath) =>
--            watchFileChanges(linkTargetPath).pipe(Stream.ignore({ log: true })),
--        }),
--      ),
-+    const watchLinkTarget = Effect.fn("serverSettings.watchLinkTarget")(
-+      function* (filePath: string) {
-+        const linkTargetPath = yield* resolveSymlinkTarget(filePath).pipe(
-+          Effect.provideService(FileSystem.FileSystem, fs),
-+          Effect.provideService(Path.Path, pathService),
-+        );
-+        if (linkTargetPath === pathService.resolve(filePath)) return Option.none<string>();
-+        yield* fs
-+          .makeDirectory(pathService.dirname(linkTargetPath), { recursive: true })
-+          .pipe(Effect.ignore({ log: true }));
-+        return Option.some(linkTargetPath);
-+      },
-+      Effect.orElseSucceed(() => Option.none<string>()),
++      if (linkTargetPath === pathService.resolve(filePath)) {
+         return Option.none<string>();
+       }
+       yield* fs
+@@ -1369,7 +1457,7 @@ const make = Effect.gen(function* () {
+     const linkTargetReady = yield* Deferred.make<void>();
+     yield* Effect.gen(function* () {
+       const [settingsEvents, resolveEvents] = yield* watchFileChanges(
+-        settingsPath,
++        filePath,
+         settingsReady,
+       ).pipe(
+         Stream.ignoreCause({ log: true }),
+@@ -1403,6 +1491,11 @@ const make = Effect.gen(function* () {
      );
--
-+    const watchSettingsFile = (filePath: string) =>
-+      Stream.unwrap(
-+        Effect.gen(function* () {
-+          const initialLinkTarget = yield* watchLinkTarget(filePath);
-+          const linkTargetEvents = Stream.make(initialLinkTarget).pipe(
-+            Stream.concat(
-+              watchFileChanges(filePath).pipe(Stream.mapEffect(() => watchLinkTarget(filePath))),
-+            ),
-+            Stream.changes,
-+            Stream.switchMap(
-+              Option.match({
-+                onNone: () => Stream.empty,
-+                onSome: (target) => watchFileChanges(target).pipe(Stream.ignore({ log: true })),
-+              }),
-+            ),
-+          );
-+          return Stream.merge(watchFileChanges(filePath), linkTargetEvents);
-+        }),
-+      );
-     // Saves emit multiple events; fs.watch may fire before content is flushed.
-     const debouncedSettingsEvents = Stream.merge(
--      watchFileChanges(settingsPath),
--      linkTargetEvents,
-+      watchSettingsFile(settingsPath),
-+      watchSettingsFile(initiativesPath),
-     ).pipe(Stream.debounce(Duration.millis(100)));
+     // Edits made once `start` returns must reach a registered watch.
+     yield* Deferred.await(linkTargetReady);
++    });
++    yield* Effect.all([watchSettingsFile(settingsPath), watchSettingsFile(initiativesPath)], {
++      concurrency: "unbounded",
++      discard: true,
++    });
+   });
  
-     yield* Stream.runForEach(debouncedSettingsEvents, () => revalidateAndEmitSafely).pipe(
-@@ -1368,10 +1461,14 @@ const make = Effect.gen(function* () {
+   const start = Effect.gen(function* () {
+@@ -1431,10 +1524,14 @@ const make = Effect.gen(function* () {
      ready: Deferred.await(startedDeferred),
      getSettings: getMaterializedSettings,
      updateSettings: (patch) =>
