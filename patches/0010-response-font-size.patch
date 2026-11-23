@@ -1,8 +1,8 @@
 diff --git a/apps/desktop/src/settings/DesktopClientSettings.test.ts b/apps/desktop/src/settings/DesktopClientSettings.test.ts
-index 90c8740f..93e94b55 100644
+index d66ca346..0622fced 100644
 --- a/apps/desktop/src/settings/DesktopClientSettings.test.ts
 +++ b/apps/desktop/src/settings/DesktopClientSettings.test.ts
-@@ -45,6 +45,8 @@ const clientSettings: ClientSettings = {
+@@ -46,6 +46,8 @@ const clientSettings: ClientSettings = {
    fontFamilyTerminal: "",
    fontSizeCode: 13,
    fontSizeInterface: 16,
@@ -12,10 +12,10 @@ index 90c8740f..93e94b55 100644
    fontSizeTerminal: 12,
    fontSmoothing: true,
 diff --git a/apps/web/src/appInit.tsx b/apps/web/src/appInit.tsx
-index ae8e685c..69c578f3 100644
+index cce59f08..9048567a 100644
 --- a/apps/web/src/appInit.tsx
 +++ b/apps/web/src/appInit.tsx
-@@ -107,6 +107,8 @@ function startClientAppearance(): void {
+@@ -108,6 +108,8 @@ function startClientAppearance(): void {
        previous.fontSizeInterface !== settings.fontSizeInterface ||
        previous.fontSizePrompt !== settings.fontSizePrompt ||
        previous.fontSizeCode !== settings.fontSizeCode ||
@@ -24,7 +24,7 @@ index ae8e685c..69c578f3 100644
        previous.fontSmoothing !== settings.fontSmoothing ||
        previousSeparateFonts !== separateFonts
      ) {
-@@ -117,6 +119,8 @@ function startClientAppearance(): void {
+@@ -118,6 +120,8 @@ function startClientAppearance(): void {
          sizeInterface: settings.fontSizeInterface,
          sizePrompt: settings.fontSizePrompt,
          sizeCode: settings.fontSizeCode,
@@ -159,10 +159,10 @@ index 50a664fe..90163c31 100644
    root.style.setProperty("--font-size-code", `${code}px`);
    root.style.setProperty("--diffs-font-size", `${code}px`);
 diff --git a/apps/web/src/components/chat/TimelineAssistantRows.tsx b/apps/web/src/components/chat/TimelineAssistantRows.tsx
-index 7f9e4479..3e74749e 100644
+index 72fcf790..84f72883 100644
 --- a/apps/web/src/components/chat/TimelineAssistantRows.tsx
 +++ b/apps/web/src/components/chat/TimelineAssistantRows.tsx
-@@ -64,6 +64,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
+@@ -69,6 +69,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
              listRef={ctx.listRef}
            >
              <ChatMarkdown
@@ -171,10 +171,10 @@ index 7f9e4479..3e74749e 100644
                renderInsights
                cwd={ctx.markdownCwd}
 diff --git a/apps/web/src/components/settings/LabsSettingsPanel.tsx b/apps/web/src/components/settings/LabsSettingsPanel.tsx
-index ba48c129..d537e0e3 100644
+index 6edcdf05..a7f4bd34 100644
 --- a/apps/web/src/components/settings/LabsSettingsPanel.tsx
 +++ b/apps/web/src/components/settings/LabsSettingsPanel.tsx
-@@ -34,41 +34,62 @@ export function LabsSettingsPanel() {
+@@ -43,41 +43,62 @@ export function LabsSettingsPanel() {
  }
  
  function KpExperienceSection() {
@@ -312,10 +312,10 @@ index 0dd8f54f..8ed66e30 100644
      settings.fontSizeInterface !== DEFAULT_UNIFIED_SETTINGS.fontSizeInterface
        ? [resolve(msg("Interface font"))]
 diff --git a/apps/web/src/components/settings/SettingsPanels.tsx b/apps/web/src/components/settings/SettingsPanels.tsx
-index e0a12417..519941dd 100644
+index 97b278a4..bb2835d9 100644
 --- a/apps/web/src/components/settings/SettingsPanels.tsx
 +++ b/apps/web/src/components/settings/SettingsPanels.tsx
-@@ -749,6 +749,8 @@ export function useSettingsRestore(onRestored?: () => void) {
+@@ -765,6 +765,8 @@ export function useSettingsRestore(onRestored?: () => void) {
        fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
        fontFamilyTerminal: DEFAULT_UNIFIED_SETTINGS.fontFamilyTerminal,
        fontSizeInterface: DEFAULT_UNIFIED_SETTINGS.fontSizeInterface,
@@ -325,10 +325,10 @@ index e0a12417..519941dd 100644
        fontSizeCode: DEFAULT_UNIFIED_SETTINGS.fontSizeCode,
        fontSizeTerminal: DEFAULT_UNIFIED_SETTINGS.fontSizeTerminal,
 diff --git a/apps/web/src/components/settings/TypographySettings.browser.test.tsx b/apps/web/src/components/settings/TypographySettings.browser.test.tsx
-index bf6f03b3..32f50f32 100644
+index cbc86365..8a922b21 100644
 --- a/apps/web/src/components/settings/TypographySettings.browser.test.tsx
 +++ b/apps/web/src/components/settings/TypographySettings.browser.test.tsx
-@@ -20,6 +20,7 @@ vi.mock(import("./SettingsFontPreviews"), () => ({
+@@ -21,6 +21,7 @@ vi.mock(import("./SettingsFontPreviews"), () => ({
    CodeFontPreview: () => <div />,
    PromptFontPreview: () => <div />,
    TerminalFontPreview: () => <div />,
@@ -337,7 +337,7 @@ index bf6f03b3..32f50f32 100644
  vi.mock(import("./settingsLayout"), async (original) => ({
    ...(await original()),
 diff --git a/apps/web/src/components/settings/TypographySettings.tsx b/apps/web/src/components/settings/TypographySettings.tsx
-index 5487991a..fab6a22d 100644
+index b9e3cfce..77e21ac8 100644
 --- a/apps/web/src/components/settings/TypographySettings.tsx
 +++ b/apps/web/src/components/settings/TypographySettings.tsx
 @@ -5,10 +5,12 @@ import {
@@ -437,13 +437,13 @@ index 5487991a..fab6a22d 100644
        <AdvancedSettings
          targetIds={[searchableSetting("separate-fonts").id, searchableSetting("font-smoothing").id]}
 diff --git a/apps/web/src/components/settings/settingsSearch.test.ts b/apps/web/src/components/settings/settingsSearch.test.ts
-index 52dadd9c..5105191f 100644
+index 3249b676..6e5efaa1 100644
 --- a/apps/web/src/components/settings/settingsSearch.test.ts
 +++ b/apps/web/src/components/settings/settingsSearch.test.ts
-@@ -149,8 +149,21 @@ describe("searchSettings", () => {
-       "auto-settle-merged-threads",
+@@ -169,8 +169,21 @@ describe("searchSettings", () => {
        "days-before-auto-settle",
        "linked-environments",
+       "agent-feedback",
 +      "response-font-size",
      ]);
      expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
@@ -463,10 +463,10 @@ index 52dadd9c..5105191f 100644
  
    it("finds linked environments on a remote host without local maintenance access", () => {
 diff --git a/apps/web/src/components/settings/settingsSearch.ts b/apps/web/src/components/settings/settingsSearch.ts
-index cdab9d3a..4808cee1 100644
+index ed210afd..6154b1d5 100644
 --- a/apps/web/src/components/settings/settingsSearch.ts
 +++ b/apps/web/src/components/settings/settingsSearch.ts
-@@ -75,6 +75,7 @@ export interface SettingsSearchItem {
+@@ -76,6 +76,7 @@ export interface SettingsSearchItem {
    readonly textGeneratorsOnly?: boolean;
    readonly secondary?: boolean;
    readonly requiresThreadAutoSettlement?: boolean;
@@ -474,7 +474,7 @@ index cdab9d3a..4808cee1 100644
  }
  
  export interface SettingsSearchAvailability {
-@@ -85,6 +86,7 @@ export interface SettingsSearchAvailability {
+@@ -86,6 +87,7 @@ export interface SettingsSearchAvailability {
    readonly canManageLocalBackend: boolean;
    readonly isWslSettingsRowVisible: boolean;
    readonly hasThreadAutoSettlement: boolean;
@@ -482,7 +482,7 @@ index cdab9d3a..4808cee1 100644
    readonly managedTunnelActive?: boolean;
    readonly hasPeerLinkHost?: boolean;
    readonly hasFastWorktreeCheckoutEnvironment?: boolean;
-@@ -407,6 +409,13 @@ export const SETTINGS_SEARCH_ITEMS = [
+@@ -420,6 +422,13 @@ export const SETTINGS_SEARCH_ITEMS = [
      to: "/settings/appearance",
      searchTerms: [msg("typography family size system sans")],
    },
@@ -496,7 +496,7 @@ index cdab9d3a..4808cee1 100644
    {
      id: "prompt-font",
      title: msg("Prompt font"),
-@@ -487,6 +496,12 @@ export const SETTINGS_SEARCH_ITEMS = [
+@@ -500,6 +509,12 @@ export const SETTINGS_SEARCH_ITEMS = [
      to: "/settings/general",
      searchTerms: [msg("hide fold running monitoring threads inbox sidebar shelf")],
    },
@@ -509,7 +509,7 @@ index cdab9d3a..4808cee1 100644
    {
      id: "initiative-management",
      title: "Enable initiative management",
-@@ -1630,6 +1645,7 @@ export function filterAvailableSettingsSearchItems(
+@@ -1678,6 +1693,7 @@ export function filterAvailableSettingsSearchItems(
        (!item.primaryEnvironmentOnly || availability.hasPrimaryEnvironment === true) &&
        (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
        (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement) &&
@@ -518,16 +518,17 @@ index cdab9d3a..4808cee1 100644
        (!item.peerLinksOnly || availability.hasPeerLinkHost === true) &&
        (!item.fastWorktreeCheckoutOnly ||
 diff --git a/apps/web/src/components/settings/useAvailableSettingsSearchItems.ts b/apps/web/src/components/settings/useAvailableSettingsSearchItems.ts
-index e6d94793..23f4b28a 100644
+index 279dbd39..99d357a4 100644
 --- a/apps/web/src/components/settings/useAvailableSettingsSearchItems.ts
 +++ b/apps/web/src/components/settings/useAvailableSettingsSearchItems.ts
-@@ -1,4 +1,5 @@
+@@ -1,5 +1,6 @@
  import { useMessages } from "gt-react";
+ import { hasFeatureFlag } from "@t3tools/client-runtime/state/server";
 +import { useClientSettings } from "~/hooks/useSettings";
  import { AuthEnvironmentMaintainScope } from "@t3tools/contracts";
  
  import { usePrimaryCloudLinkState } from "~/cloud/cloudLinkState";
-@@ -19,6 +20,7 @@ import {
+@@ -28,6 +29,7 @@ export function useHasSecretProvidersEnvironment() {
  
  export function useAvailableSettingsSearchItems() {
    const { environments } = useEnvironments();
@@ -535,7 +536,7 @@ index e6d94793..23f4b28a 100644
    // Explicit booleans keep flags out of the filter cache so environment updates do not rebuild the list.
    const hasEnvironment =
      environments.some((environment) => environment.serverConfig !== null) === true;
-@@ -63,6 +65,7 @@ export function useAvailableSettingsSearchItems() {
+@@ -79,6 +81,7 @@ export function useAvailableSettingsSearchItems() {
      isWslSettingsRowVisible({ state: desktopWsl.data, error: desktopWsl.error }) === true;
  
    return filterAvailableSettingsSearchItems({
@@ -544,10 +545,10 @@ index e6d94793..23f4b28a 100644
      hasCloudPublicConfig: cloudPublicConfig,
      hasEnvironment,
 diff --git a/apps/web/src/index.css b/apps/web/src/index.css
-index 05541d39..58a0ecb1 100644
+index 15380512..9abb39a4 100644
 --- a/apps/web/src/index.css
 +++ b/apps/web/src/index.css
-@@ -2649,3 +2649,57 @@ code {
+@@ -2683,3 +2683,57 @@ code {
  .messages-timeline-scroll:focus-visible {
    outline: none;
  }
@@ -643,7 +644,7 @@ index 9dc56d7a..99b73417 100644
    it("keeps cleanup disabled for existing installations", () => {
      expect(decodeServerSettings({}).worktreeCleanup).toBeNull();
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index 2ad6d402..19fd58db 100644
+index bc8edd52..e86378c3 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
 @@ -173,6 +173,14 @@ export const InterfaceFontSize = Schema.Int.check(
@@ -661,7 +662,7 @@ index 2ad6d402..19fd58db 100644
  export const MIN_PROMPT_FONT_SIZE = 12;
  export const MAX_PROMPT_FONT_SIZE = 20;
  export const PromptFontSize = Schema.Int.check(
-@@ -484,6 +492,10 @@ export const ClientSettingsSchema = Schema.Struct({
+@@ -491,6 +499,10 @@ export const ClientSettingsSchema = Schema.Struct({
    fontSizeInterface: InterfaceFontSize.pipe(
      Schema.withDecodingDefault(Effect.succeed(DEFAULT_INTERFACE_FONT_SIZE)),
    ),
@@ -672,7 +673,7 @@ index 2ad6d402..19fd58db 100644
    fontSizePrompt: PromptFontSize.pipe(
      Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROMPT_FONT_SIZE)),
    ),
-@@ -2131,6 +2143,8 @@ export const ClientSettingsPatch = Schema.Struct({
+@@ -2152,6 +2164,8 @@ export const ClientSettingsPatch = Schema.Struct({
    glassOpacity: Schema.optionalKey(GlassOpacity),
    onboardingCompletedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
    fontSizeInterface: Schema.optionalKey(InterfaceFontSize),

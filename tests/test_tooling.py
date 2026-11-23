@@ -42,7 +42,7 @@ def framework(app, flags=b'11111111'):
 
 
 class ToolingTest(unittest.TestCase):
-    def test_beta_inspection_preserves_exact_version_commit_and_rejects_nightly(self):
+    def test_inspection_accepts_beta_and_nightly_and_rejects_preview(self):
         with tempfile.TemporaryDirectory() as temp:
             app = Path(temp) / 'T3 Code (Beta).app'
             resources = app / 'Contents/Resources'
@@ -54,12 +54,13 @@ class ToolingTest(unittest.TestCase):
                 plistlib.dump({'CFBundleExecutable': exe.name}, f)
             framework(app)
             package = {'version': '0.1.9', 't3codeCommitHash': 'a' * 40}
-            for version, accepted in [('0.1.9', True), ('0.1.10-nightly.20261116.4761', False)]:
+            for version, accepted in [('0.1.9', True), ('0.1.10-nightly.20261116.4761', True),
+                                      ('0.1.10-preview.20261116.4761', False)]:
                 package['version'] = version
                 asar(resources / 'app.asar', {'package.json': json.dumps(package).encode()})
                 if accepted:
                     result = tool.inspect_app(app)
-                    self.assertEqual((result['version'], result['commit']), ('0.1.9', 'a' * 40))
+                    self.assertEqual((result['version'], result['commit']), (version, 'a' * 40))
                     self.assertEqual(result['executableSha256'], tool.sha256(exe))
                 else:
                     with self.assertRaises(tool.Stop):
@@ -87,7 +88,7 @@ class ToolingTest(unittest.TestCase):
                         (folder / 'inject.cjs').write_text('changed loader')
                     elif corrupt == 'added-file':
                         (folder / 'extra.cjs').write_text('unexpected loader')
-                    reason = 'Official Beta changed' if corrupt == 'app' else 'inventory' if corrupt == 'added-file' else 'Staged build changed'
+                    reason = 'official app changed' if corrupt == 'app' else 'inventory' if corrupt == 'added-file' else 'Staged build changed'
                     with self.assertRaisesRegex(tool.Stop, reason):
                         tool.launch(args)
                     spawn.assert_not_called()
@@ -170,6 +171,116 @@ class ToolingTest(unittest.TestCase):
                 child.terminate.assert_called_once_with()
                 child.wait.assert_called_once_with(timeout=5)
                 child.kill.assert_not_called()
+
+    def test_nightly_update_preserves_last_working_build_and_reports_recovery(self):
+        with tempfile.TemporaryDirectory() as temp:
+            data = Path(temp)
+            version = '0.1.12-nightly.20261123.5151'
+            old = {'app': {'version': '0.1.11'}, 'build': 'beta'}
+            tool.atomic_json(data / 'current.json', old)
+            args = types.SimpleNamespace(data_dir=str(data), version=None)
+            error = tool.PatchFailure('0001-initiative-groups.patch')
+
+            def build(_):
+                tool.atomic_json(data / 'current.json', {'app': {'version': version}, 'build': 'nightly'})
+
+            with patch.object(tool, 'latest_nightly', return_value=version), \
+                    patch.object(tool, 'nightly_app', return_value=data / 'Nightly.app') as app, \
+                    patch.object(tool, 'recipe_hash', return_value='original') as recipe, \
+                    patch.object(tool, 'build', side_effect=error) as stage:
+                with self.assertRaisesRegex(tool.PatchFailure, error.patch):
+                    tool.nightly_update(args)
+                self.assertEqual(tool.read_json(data / 'current.json'), old)
+                failed = tool.read_json(data / 'nightly-status.json')
+                self.assertEqual(failed['pendingEvents'][0]['active'], '0.1.11')
+                self.assertEqual(failed['patch'], error.patch)
+                tool.nightly_update(args)
+                app.assert_called_once_with(data.resolve(), version)
+                stage.assert_called_once()
+                self.assertEqual(tool.read_json(data / 'nightly-status.json'), failed)
+                recipe.return_value = 'merged repair'
+                stage.side_effect = build
+                tool.nightly_update(args)
+
+            recovered = tool.read_json(data / 'nightly-status.json')
+            self.assertEqual(recovered['active'], version)
+            self.assertEqual(recovered['reportedFailures'], [])
+            self.assertEqual([event['kind'] for event in recovered['pendingEvents']], ['failure', 'recovery'])
+
+    def test_check_failure_is_repairable_after_a_transient_feed_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            data = Path(temp)
+            version = '0.1.12-nightly.20261123.5151'
+            args = types.SimpleNamespace(data_dir=str(data), version=None)
+            with patch.object(tool, 'latest_nightly', side_effect=[version, tool.Stop('feed offline')]), \
+                    patch.object(tool, 'nightly_app', return_value=data / 'Nightly.app'), \
+                    patch.object(tool, 'recipe_hash', return_value='original'), \
+                    patch.object(tool, 'build', side_effect=tool.CheckFailure('feature check failed')):
+                with self.assertRaises(tool.CheckFailure):
+                    tool.nightly_update(args)
+                with self.assertRaisesRegex(tool.Stop, 'feed offline'):
+                    tool.nightly_update(args)
+            status = tool.read_json(data / 'nightly-status.json')
+            self.assertEqual(status['blocked']['stage'], 'checks')
+            self.assertEqual(status['blocked']['version'], version)
+            self.assertEqual([event['stage'] for event in status['pendingEvents']], ['checks', 'release'])
+
+    def test_nightly_notification_retries_when_t3_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            data = Path(temp)
+            tool.atomic_json(data / 'nightly-maintenance.json', {'thread': 'mcp:launch:fixture'})
+            version = '0.1.12-nightly.20261123.5151'
+            status = tool.record_nightly_result(data, version, 'patch', tool.PatchFailure('feature.patch'))
+            with patch.object(tool.subprocess, 'run', return_value=types.SimpleNamespace(returncode=1)) as send:
+                tool.deliver_nightly_events(data, status)
+                args = send.call_args.args[0]
+                self.assertEqual(args[:6], [str(data / 't3/bin/t3'), 'thread', 'send', '--base-dir',
+                                           str(data / 't3'), 'mcp:launch:fixture'])
+                self.assertIn(json.dumps(status['pendingEvents'][0]), args[6])
+                self.assertEqual(tool.read_json(data / 'nightly-status.json'), status)
+                send.return_value = types.SimpleNamespace(returncode=0)
+                tool.deliver_nightly_events(data, status)
+            self.assertEqual(tool.read_json(data / 'nightly-status.json')['pendingEvents'], [])
+
+    def test_running_beta_blocks_launch_of_staged_nightly(self):
+        with tempfile.TemporaryDirectory() as temp:
+            data = Path(temp)
+            tool.atomic_json(data / 'running.json', {'pid': 123, 'build': 'beta'})
+            tool.atomic_json(data / 'current.json', {
+                'app': {'executable': '/fixture/Nightly.app/Contents/MacOS/Nightly'}, 'build': 'nightly',
+            })
+            running = types.SimpleNamespace(
+                returncode=0,
+                stdout=f'/fixture/Beta.app/Contents/MacOS/Beta --inspect-brk=127.0.0.1:1234 --user-data-dir={data.resolve() / "electron"}\n',
+            )
+            with patch.object(tool, 'validate_artifact'), patch.object(tool.subprocess, 'run', return_value=running), \
+                    patch.object(tool.subprocess, 'Popen') as spawn:
+                tool.launch(types.SimpleNamespace(data_dir=str(data)))
+                spawn.assert_not_called()
+
+    def test_nightly_retention_keeps_active_previous_running_and_candidate(self):
+        with tempfile.TemporaryDirectory() as temp:
+            data = Path(temp)
+            keep = [f'0.1.12-nightly.20261123.{run}' for run in range(10, 14)]
+            stale = '0.1.12-nightly.20261122.9'
+            beta = '0.1.11'
+            foreign = '0.1.10-nightly.20261119.1'
+            build_name = lambda version: f'{version}-0123456789ab-12345678'
+            for version in [*keep, stale, beta, foreign]:
+                app = data / 'apps' / version
+                app.mkdir(parents=True)
+                if version != foreign:
+                    (app / '.managed-nightly').touch()
+                if version != keep[-1] and version != foreign:
+                    artifact = data / 'builds' / build_name(version)
+                    artifact.mkdir(parents=True)
+                    (artifact / 'inject.cjs').touch()
+            for filename, version in zip(('current.json', 'previous.json', 'running.json'), keep):
+                tool.atomic_json(data / filename, {'build': build_name(version)})
+            tool.prune_nightly_artifacts(data, keep[-1])
+            self.assertEqual({item.name for item in (data / 'apps').iterdir()}, {*keep, beta, foreign})
+            self.assertEqual({item.name for item in (data / 'builds').iterdir()},
+                             {build_name(version) for version in [*keep[:-1], beta]})
 
     def test_node_archive_accepts_internal_links_and_rejects_external_links_on_python39(self):
         import io

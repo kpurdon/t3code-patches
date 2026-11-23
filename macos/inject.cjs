@@ -35,7 +35,7 @@ function install(overlay, { closeInspector = false } = {}) {
     fs.mkdirSync(profile, { recursive: true });
     app.setPath('userData', profile);
     app.setPath('sessionData', profile);
-    app.relaunch = () => console.error('Restart with the patched Beta launcher.');
+    app.relaunch = () => console.error('Restart with the patched T3 Code launcher.');
     app.setAsDefaultProtocolClient = () => false;
     app.removeAsDefaultProtocolClient = () => false;
   }

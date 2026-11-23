@@ -236,7 +236,7 @@ index 9cb27b4c..f3032bea 100644
  function splitPatch(patch: UnifiedSettingsPatch): {
    serverPatch: ServerSettingsPatch;
 diff --git a/apps/web/test/fakeEnvironment.ts b/apps/web/test/fakeEnvironment.ts
-index 10b6cdf2..8dc0c44f 100644
+index b4670cdc..1894e681 100644
 --- a/apps/web/test/fakeEnvironment.ts
 +++ b/apps/web/test/fakeEnvironment.ts
 @@ -35,7 +35,10 @@ import {
@@ -250,7 +250,7 @@ index 10b6cdf2..8dc0c44f 100644
  import type {
    ConnectionAttemptError,
    ConnectionCatalogEntry,
-@@ -418,16 +421,19 @@ const threadSubscribers = new Map<string, Queue.Queue<OrchestrationV2ThreadStrea
+@@ -427,16 +430,19 @@ const threadSubscribers = new Map<string, Queue.Queue<OrchestrationV2ThreadStrea
  let terminalMetadataSubscriber: Queue.Queue<TerminalMetadataStreamEvent> | null = null;
  let shellSubscriber: Queue.Queue<OrchestrationV2ShellStreamItem> | null = null;
  let threads: ReadonlyArray<FakeThread> = [];
@@ -271,7 +271,7 @@ index 10b6cdf2..8dc0c44f 100644
  let sequence = 1;
  let vcsStatusSubscriber: Queue.Queue<VcsStatusStreamEvent> | null = null;
  
-@@ -445,6 +451,17 @@ const subscribe = <A>(first: ReadonlyArray<A>, register?: (queue: Queue.Queue<A>
+@@ -454,6 +460,17 @@ const subscribe = <A>(first: ReadonlyArray<A>, register?: (queue: Queue.Queue<A>
    );
  
  const handlers: Record<string, (input: never) => unknown> = {
@@ -289,7 +289,7 @@ index 10b6cdf2..8dc0c44f 100644
    // Recorded, and accepted only when the scenario asks, since a pending command holds every
    // later command on its thread. Accepted commands' events never arrive.
    [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command: OrchestrationV2Command) =>
-@@ -544,10 +561,20 @@ const handlers: Record<string, (input: never) => unknown> = {
+@@ -553,10 +570,20 @@ const handlers: Record<string, (input: never) => unknown> = {
          if (vcsStatusSubscriber === queue) vcsStatusSubscriber = null;
        };
      }),
@@ -312,7 +312,7 @@ index 10b6cdf2..8dc0c44f 100644
  // Unanswered calls stay pending, like a server that has not replied yet.
  const client = new Proxy(handlers, {
    get: (target, method: string) =>
-@@ -561,8 +588,7 @@ const client = new Proxy(handlers, {
+@@ -570,8 +597,7 @@ const client = new Proxy(handlers, {
  const session: EnvironmentConnectionLease["session"] = {
    client: client as unknown as WsRpcProtocolClient,
    initialConfig: Effect.sync(serverConfig),
@@ -322,7 +322,7 @@ index 10b6cdf2..8dc0c44f 100644
    ready: Effect.void,
    probe: Effect.void,
    inboundFrames: Effect.succeed(0),
-@@ -601,6 +627,7 @@ export function installFakeEnvironment(
+@@ -610,6 +636,7 @@ export function installFakeEnvironment(
    fixtures: ReadonlyArray<FakeThread>,
    options?: {
      readonly acceptCommands?: boolean;
@@ -330,7 +330,7 @@ index 10b6cdf2..8dc0c44f 100644
      readonly settings?: Partial<ServerConfig["settings"]>;
      readonly initiativeGroups?: boolean;
      readonly projects?: ReadonlyArray<OrchestrationProjectShell>;
-@@ -638,6 +665,8 @@ export function installFakeEnvironment(
+@@ -647,6 +674,8 @@ export function installFakeEnvironment(
      })),
    ];
    holdCommand = options?.holdCommand ?? (() => false);
@@ -339,7 +339,7 @@ index 10b6cdf2..8dc0c44f 100644
    globalThis.fetch = async (input, init) => {
      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
      if (url.origin !== window.location.origin) return realFetch(input, init);
-@@ -667,6 +696,8 @@ export function installFakeEnvironment(
+@@ -676,6 +705,8 @@ export function installFakeEnvironment(
        holdCommand = () => false;
        pendingDispatches = [];
        pendingAssetUrls = [];
@@ -348,7 +348,7 @@ index 10b6cdf2..8dc0c44f 100644
      },
    };
  }
-@@ -707,6 +738,14 @@ export function dispatchedCommands(): ReadonlyArray<OrchestrationV2Command> {
+@@ -716,6 +747,14 @@ export function dispatchedCommands(): ReadonlyArray<OrchestrationV2Command> {
    return dispatched;
  }
  
