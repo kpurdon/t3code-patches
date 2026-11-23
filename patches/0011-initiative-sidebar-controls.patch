@@ -1,8 +1,8 @@
 diff --git a/apps/server/src/auth/RpcAuthorization.test.ts b/apps/server/src/auth/RpcAuthorization.test.ts
-index 1d386106..ce87127f 100644
+index 750ff136..b25e6a93 100644
 --- a/apps/server/src/auth/RpcAuthorization.test.ts
 +++ b/apps/server/src/auth/RpcAuthorization.test.ts
-@@ -326,7 +326,7 @@ describe("settings mutation authorization", () => {
+@@ -480,7 +480,7 @@ describe("settings mutation authorization", () => {
    );
  
    it.effect(
@@ -11,7 +11,7 @@ index 1d386106..ce87127f 100644
      () =>
        Effect.gen(function* () {
          let handled = false;
-@@ -359,6 +359,11 @@ describe("settings mutation authorization", () => {
+@@ -513,6 +513,11 @@ describe("settings mutation authorization", () => {
              patch: { requireConnectDeviceApproval: false },
            }).pipe(Effect.flip),
          ).toMatchObject({ requiredPermission: AuthAccessWriteScope });
@@ -228,18 +228,18 @@ index 3d05752b..5381d596 100644
  /** Grouping is independently repairable after an accepted launch; never turn it into a false launch failure. */
  export const inheritInitiative = Effect.fn("initiatives.inherit")(function* (
 diff --git a/apps/server/src/provider/agentContextBudget.json b/apps/server/src/provider/agentContextBudget.json
-index b4ce15d6..6025db92 100644
+index 52f92c82..c12d2e4b 100644
 --- a/apps/server/src/provider/agentContextBudget.json
 +++ b/apps/server/src/provider/agentContextBudget.json
 @@ -1,5 +1,5 @@
  {
    "claudeSystemAppendBytes": 6245,
    "codexAdditionalContextBytes": 7639,
--  "mcpToolListJsonBytes": 58390
-+  "mcpToolListJsonBytes": 58453
+-  "mcpToolListJsonBytes": 62793
++  "mcpToolListJsonBytes": 62856
  }
 diff --git a/apps/server/src/serverSettings.ts b/apps/server/src/serverSettings.ts
-index cc1316c7..5cf857b6 100644
+index b70f588f..35d928d5 100644
 --- a/apps/server/src/serverSettings.ts
 +++ b/apps/server/src/serverSettings.ts
 @@ -1,3 +1,4 @@
@@ -247,7 +247,7 @@ index cc1316c7..5cf857b6 100644
  import {
    DEFAULT_SERVER_SETTINGS,
    Initiatives,
-@@ -208,10 +209,28 @@ function ensureInitiativeWritesAllowed(
+@@ -209,10 +210,28 @@ function ensureInitiativeWritesAllowed(
    patch: ServerSettingsPatch,
    settingsPath: string,
  ) {
@@ -280,7 +280,7 @@ index cc1316c7..5cf857b6 100644
  }
  
  const secretProviderConfigGuards = new Map(
-@@ -1453,59 +1472,61 @@ const make = Effect.gen(function* () {
+@@ -1467,59 +1486,61 @@ const make = Effect.gen(function* () {
      const revalidateAndEmitSafely = revalidateAndEmit.pipe(Effect.ignoreCause({ log: true }));
  
      // Watch symlink targets' directories for rewrites; re-resolve link changes to follow repointing.
@@ -394,16 +394,17 @@ index cc1316c7..5cf857b6 100644
      yield* Effect.all([watchSettingsFile(settingsPath), watchSettingsFile(initiativesPath)], {
        concurrency: "unbounded",
 diff --git a/apps/server/src/ws.ts b/apps/server/src/ws.ts
-index 11c20122..ef9c248f 100644
+index 5ee22be5..e5406054 100644
 --- a/apps/server/src/ws.ts
 +++ b/apps/server/src/ws.ts
-@@ -1,3 +1,5 @@
-+import { ServerSettingsError } from "@t3tools/contracts";
+@@ -1,4 +1,5 @@
+-import { GitCommandError, OrchestrationDispatchCommandError } from "@t3tools/contracts";
++import { GitCommandError, OrchestrationDispatchCommandError, ServerSettingsError } from "@t3tools/contracts";
 +import { settleInitiative } from "./initiatives.ts";
- import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
  // @effect-diagnostics-next-line nodeBuiltinImport:off -- A synchronous digest inside the pure provider mapping.
  import * as NodeCrypto from "node:crypto";
-@@ -1903,6 +1905,7 @@ export const layerWsRpc = (
+ import * as FeatureFlags from "@t3tools/shared/FeatureFlags";
+@@ -1927,6 +1928,7 @@ export const layerWsRpc = (
            shellThreadFamilies: true,
            initiativeGroups: settings.initiativeManagementEnabled,
            initiativeManagementSettings: true,
@@ -411,7 +412,7 @@ index 11c20122..ef9c248f 100644
            threadLinkMetadata: true,
            shellOlderSettled: true,
            threadResumeCompletionMarker: true,
-@@ -2720,6 +2723,23 @@ export const layerWsRpc = (
+@@ -2792,6 +2794,23 @@ export const layerWsRpc = (
          [WS_METHODS.serverUpdateSettings]:
            /* Request instrumentation already owns the span; keep this helper in that context. */
            Effect.fnUntraced(function* ({ patch, providerInstanceMutation }) {
@@ -1033,8 +1034,23 @@ index b8f5a037..9655052a 100644
      </>
    );
  }
+diff --git a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
+index ed929629..9b53ec5f 100644
+--- a/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
++++ b/apps/web/src/components/Sidebar.initiatives.browser.test.tsx
+@@ -141,9 +141,7 @@ it("selects visible grouped ranges, excludes collapsed members and shelf counts,
+   await shiftClick(foreign.title);
+   expect(selected()).toEqual([key(flat.id), key(a.id), key(b.id), key(foreign.id)]);
+   await expect.element(row(foreign.title)).toBeVisible();
+-  await userEvent.click(
+-    page.getByRole("combobox", { name: "Filter threads by project", exact: true }),
+-  );
++  await userEvent.click(page.getByRole("combobox", { name: "Projects", exact: true }));
+   await userEvent.click(page.getByRole("option", { name: "local-repository", exact: true }));
+   await expect.element(row(a.title)).toBeVisible();
+   await expect.element(row(foreign.title)).not.toBeInTheDocument();
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index 41cdaed8..7cec32fb 100644
+index e57fbbb1..6f5a55ff 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
 @@ -4,7 +4,7 @@ import { m } from "../i18n/messages";
@@ -1046,7 +1062,7 @@ index 41cdaed8..7cec32fb 100644
  import { attachSidebarTree } from "../lib/sidebarTree";
  import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
  import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
-@@ -501,6 +501,11 @@ function useSidebarThreads(input: {
+@@ -511,6 +511,11 @@ function useSidebarThreads(input: {
      [] as readonly string[],
      INITIATIVE_COLLAPSED_SCHEMA,
    );
@@ -1058,7 +1074,7 @@ index 41cdaed8..7cec32fb 100644
    const initiatives = initiativeLayout(
      threads,
      serverConfigs,
-@@ -508,6 +513,7 @@ function useSidebarThreads(input: {
+@@ -518,6 +523,7 @@ function useSidebarThreads(input: {
      collapsedInitiatives,
      expandedInitiativeSettled,
      routeRowThreadKey,
@@ -1066,7 +1082,7 @@ index 41cdaed8..7cec32fb 100644
    );
    const partition = partitionSidebarThreads({
      threads: threads.filter((thread) => !initiatives.keys.has(threadShellKey(thread))),
-@@ -608,6 +614,13 @@ function useSidebarThreads(input: {
+@@ -618,6 +624,13 @@ function useSidebarThreads(input: {
    return {
      ...partition,
      initiatives,
@@ -1080,7 +1096,7 @@ index 41cdaed8..7cec32fb 100644
      threads,
      workingShelfEnabled,
      searchableThreads: [
-@@ -1357,6 +1370,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -1366,6 +1379,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
    const {
      workingShelfEnabled,
      initiatives,
@@ -1088,7 +1104,7 @@ index 41cdaed8..7cec32fb 100644
      pinnedThreads,
      draggableThreadKeys,
      activeReorderableThreadKeys,
-@@ -3617,6 +3631,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3689,6 +3703,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            key="initiatives"
                            threads={threads}
                            groups={initiatives.groups}
@@ -1096,7 +1112,7 @@ index 41cdaed8..7cec32fb 100644
                            renderThread={(thread, parent, initiative) =>
                              renderThreadRow(
                                thread,
-@@ -3796,10 +3811,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3868,10 +3883,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                {/* Plus means "add", so revealing more uses a chevron. */}
                                <ChevronDownIcon aria-hidden className="size-4 shrink-0" />
                                {olderSettledShelf.loading
@@ -1119,10 +1135,10 @@ index 41cdaed8..7cec32fb 100644
                            </li>
                          ) : null,
 diff --git a/apps/web/src/components/settings/LabsSettingsPanel.tsx b/apps/web/src/components/settings/LabsSettingsPanel.tsx
-index d537e0e3..b7f0e92b 100644
+index a7f4bd34..c3e694de 100644
 --- a/apps/web/src/components/settings/LabsSettingsPanel.tsx
 +++ b/apps/web/src/components/settings/LabsSettingsPanel.tsx
-@@ -34,6 +34,7 @@ export function LabsSettingsPanel() {
+@@ -43,6 +43,7 @@ export function LabsSettingsPanel() {
  }
  
  function KpExperienceSection() {
@@ -1130,7 +1146,7 @@ index d537e0e3..b7f0e92b 100644
    const settings = useScopedSettings();
    const updateSettings = useUpdateScopedSettings();
    return (
-@@ -57,6 +58,7 @@ function KpExperienceSection() {
+@@ -66,6 +67,7 @@ function KpExperienceSection() {
  }
  
  function InitiativeManagementRow() {
@@ -1139,7 +1155,7 @@ index d537e0e3..b7f0e92b 100644
    const settings = useScopedSettings();
    const updateSettings = useUpdateScopedSettings();
 diff --git a/apps/web/src/components/settings/TypographySettings.tsx b/apps/web/src/components/settings/TypographySettings.tsx
-index fab6a22d..ed746cd5 100644
+index 77e21ac8..ee7e346f 100644
 --- a/apps/web/src/components/settings/TypographySettings.tsx
 +++ b/apps/web/src/components/settings/TypographySettings.tsx
 @@ -110,6 +110,7 @@ function InterfaceFontRow({ preview }: { preview?: ReactNode }) {
@@ -1160,7 +1176,7 @@ index fab6a22d..ed746cd5 100644
                updateSettings({ fontSizeResponse: DEFAULT_UNIFIED_SETTINGS.fontSizeResponse })
              }
 diff --git a/apps/web/src/components/threadActionMenu.logic.ts b/apps/web/src/components/threadActionMenu.logic.ts
-index 75d55cbb..196b4e78 100644
+index 6296b6da..23b98d6b 100644
 --- a/apps/web/src/components/threadActionMenu.logic.ts
 +++ b/apps/web/src/components/threadActionMenu.logic.ts
 @@ -10,6 +10,8 @@ export type ThreadActionMenuId =
@@ -1186,7 +1202,7 @@ index 75d55cbb..196b4e78 100644
        }
      | undefined;
    readonly canOperate: boolean;
-@@ -157,6 +164,16 @@ export function buildThreadActionMenuItems(
+@@ -159,6 +166,16 @@ export function buildThreadActionMenuItems(
    state: ThreadActionMenuState,
    resolve: MessageResolver = m,
  ): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
@@ -1203,7 +1219,7 @@ index 75d55cbb..196b4e78 100644
    const items: ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> = [
      ...(state.initiative
        ? [
-@@ -175,6 +192,18 @@ export function buildThreadActionMenuItems(
+@@ -177,6 +194,18 @@ export function buildThreadActionMenuItems(
                        icon: "folder-minus",
                      },
                    ]),
@@ -1295,10 +1311,10 @@ index 58c90410..3e50445a 100644
        },
      });
 diff --git a/packages/contracts/src/server.ts b/packages/contracts/src/server.ts
-index 237f9b31..ed13bd98 100644
+index a61c746f..7aa416e0 100644
 --- a/packages/contracts/src/server.ts
 +++ b/packages/contracts/src/server.ts
-@@ -727,6 +727,7 @@ export const ServerConfig = Schema.Struct({
+@@ -734,6 +734,7 @@ export const ServerConfig = Schema.Struct({
    /** Persistent initiative display groups and native grouping tools. */
    initiativeGroups: Schema.optionalKey(Schema.Boolean),
    initiativeManagementSettings: Schema.optionalKey(Schema.Boolean),
@@ -1307,10 +1323,10 @@ index 237f9b31..ed13bd98 100644
    /**
     * The shell can leave older settled threads out of snapshots (`omitOlderSettled`), and
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index 19fd58db..b6acf277 100644
+index e86378c3..e0413565 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
-@@ -1410,7 +1410,11 @@ export const InitiativeChange = Schema.Union([
+@@ -1424,7 +1424,11 @@ export const InitiativeChange = Schema.Union([
      id: InitiativeId,
      threadId: Schema.NullOr(ThreadId),
    }),
@@ -1323,7 +1339,7 @@ index 19fd58db..b6acf277 100644
  ]);
  export type InitiativeChange = typeof InitiativeChange.Type;
  
-@@ -1805,6 +1809,7 @@ export const ServerSettingsOperation = Schema.Literals([
+@@ -1824,6 +1828,7 @@ export const ServerSettingsOperation = Schema.Literals([
    "write-managed-setting",
    "use-disallowed-provider",
    "initiative-disabled",
@@ -1331,7 +1347,7 @@ index 19fd58db..b6acf277 100644
  ]);
  export type ServerSettingsOperation = typeof ServerSettingsOperation.Type;
  
-@@ -1828,6 +1833,8 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
+@@ -1847,6 +1852,8 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
    },
  ) {
    override get message(): string {
@@ -1340,7 +1356,7 @@ index 19fd58db..b6acf277 100644
      if (this.operation === "initiative-disabled")
        return "Enable initiative management in Settings → Labs → The KP Experience.";
      if (this.operation === "write-managed-setting") {
-@@ -1861,7 +1868,11 @@ const ModelSelectionPatch = Schema.Struct({
+@@ -1880,7 +1887,11 @@ const ModelSelectionPatch = Schema.Struct({
    options: Schema.optionalKey(ProviderOptionSelections),
  });
  
@@ -1352,7 +1368,7 @@ index 19fd58db..b6acf277 100644
    initiativeChange: Schema.optionalKey(InitiativeChange),
    setModelFavorites: Schema.optionalKey(
      Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
-@@ -2091,6 +2102,7 @@ export function requiredScopesForServerSettingsPatch(
+@@ -2112,6 +2123,7 @@ export function requiredScopesForServerSettingsPatch(
    }
    return [
      ...(changesSettings || (!changesProviders && !changesAccess) ? [AuthSettingsWriteScope] : []),

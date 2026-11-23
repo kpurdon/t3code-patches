@@ -1,5 +1,5 @@
 diff --git a/apps/server/src/serverSettings.test.ts b/apps/server/src/serverSettings.test.ts
-index f837fd8c..ca5075f9 100644
+index 5d46c916..eafd8e10 100644
 --- a/apps/server/src/serverSettings.test.ts
 +++ b/apps/server/src/serverSettings.test.ts
 @@ -3,6 +3,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -207,7 +207,7 @@ index f837fd8c..ca5075f9 100644
      Effect.gen(function* () {
        const service = yield* ServerSettingsModule.ServerSettingsService;
 diff --git a/apps/server/src/serverSettings.ts b/apps/server/src/serverSettings.ts
-index 66f0595a..366b0a43 100644
+index 14a64a1a..f198f050 100644
 --- a/apps/server/src/serverSettings.ts
 +++ b/apps/server/src/serverSettings.ts
 @@ -1,5 +1,6 @@
@@ -225,7 +225,7 @@ index 66f0595a..366b0a43 100644
  import * as SqlClient from "effect/sql/SqlClient";
  import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
  import { resolveSymlinkTarget } from "@t3tools/shared/symlink";
-@@ -77,8 +79,12 @@ export {
+@@ -78,8 +80,12 @@ export {
  } from "@t3tools/shared/serverSettings";
  
  const encodeServerSettings = Schema.encodeEffect(ServerSettings);
@@ -239,7 +239,48 @@ index 66f0595a..366b0a43 100644
  
  const textEncoder = new TextEncoder();
  const textDecoder = new TextDecoder();
-@@ -672,6 +678,7 @@ const make = Effect.gen(function* () {
+@@ -412,11 +418,25 @@ const decodeLegacyProviderSettingsJsonExit = Schema.decodeUnknownExit(LegacyProv
+ function decodeSettingsFile(
+   raw: string,
+   managed: ManagedPolicy.ManagedPolicy["Service"]["settings"],
++  hasStoredInitiatives = false,
+ ) {
+   const parsed = decodeSettingsFileJsonExit(raw);
++  const hasLegacy =
++    Exit.isSuccess(parsed) &&
++    parsed.value !== null &&
++    typeof parsed.value === "object" &&
++    Object.hasOwn(parsed.value, "initiatives");
+   const decoded = Exit.isFailure(parsed)
+     ? parsed
+-    : decodePersistedServerSettingsExit(managed.withDefaults(parsed.value));
++    : decodePersistedServerSettingsExit(
++        managed.withDefaults(
++          hasStoredInitiatives && hasLegacy
++            ? Object.fromEntries(
++                Object.entries(parsed.value as object).filter(([key]) => key !== "initiatives"),
++              )
++            : parsed.value,
++        ),
++      );
+   const legacy = decodeLegacyProviderSettingsJsonExit(raw);
+   const failure = Exit.isFailure(decoded)
+     ? decoded.cause
+@@ -432,7 +452,12 @@ function decodeSettingsFile(
+           continueThreadsAfterServerUpdate: false,
+           usageHistoryRetentionDays: "unlimited",
+         };
+-  return { settings, legacy: Exit.isSuccess(legacy) ? legacy.value : undefined, failure };
++  return {
++    settings,
++    legacy: Exit.isSuccess(legacy) ? legacy.value : undefined,
++    failure,
++    hasLegacyInitiatives: failure === undefined && hasLegacy,
++  };
+ }
+ 
+ const LEGACY_BITBUCKET_SECRET_NAMES: Readonly<Record<string, string>> = {
+@@ -717,6 +742,7 @@ const make = Effect.gen(function* () {
    const { settingsPath } = yield* ServerConfig.ServerConfig;
    const fs = yield* FileSystem.FileSystem;
    const pathService = yield* Path.Path;
@@ -247,7 +288,7 @@ index 66f0595a..366b0a43 100644
    const secretStore = yield* ServerSecretStore.ServerSecretStore;
    const sql = yield* SqlClient.SqlClient;
    const {
-@@ -754,6 +761,58 @@ const make = Effect.gen(function* () {
+@@ -799,6 +825,58 @@ const make = Effect.gen(function* () {
      ),
    );
  
@@ -306,7 +347,7 @@ index 66f0595a..366b0a43 100644
    const moveInlineSettingsSecrets = Effect.fn("serverSettings.moveInlineSettingsSecrets")(
      function* (settings: ServerSettings) {
        const pending: SettingsSecret[] = [];
-@@ -785,17 +844,30 @@ const make = Effect.gen(function* () {
+@@ -830,13 +908,16 @@ const make = Effect.gen(function* () {
    );
  
    const loadSettingsFromDisk = Effect.gen(function* () {
@@ -318,35 +359,14 @@ index 66f0595a..366b0a43 100644
 +    let hasLegacyInitiatives = false;
  
      if (yield* readConfigExists) {
-       const raw = yield* readRawConfig;
-       const parsed = decodeSettingsFileJsonExit(raw);
-+      const preferences =
-+        Exit.isSuccess(parsed) &&
-+        Option.isSome(storedInitiatives) &&
-+        parsed.value !== null &&
-+        typeof parsed.value === "object"
-+          ? Object.fromEntries(
-+              Object.entries(parsed.value).filter(([key]) => key !== "initiatives"),
-+            )
-+          : Exit.isSuccess(parsed)
-+            ? parsed.value
-+            : undefined;
-       const decoded = Exit.isFailure(parsed)
-         ? parsed
--        : decodePersistedServerSettingsExit(managed.withDefaults(parsed.value));
-+        : decodePersistedServerSettingsExit(managed.withDefaults(preferences));
-       const legacySettings = decodeLegacyProviderSettingsJsonExit(raw);
-       if (legacySettings._tag === "Success") {
-         legacyProviders = legacySettings.value.providers;
-@@ -822,8 +894,19 @@ const make = Effect.gen(function* () {
-         }
-       } else {
-         settings = decoded.value;
-+        hasLegacyInitiatives =
-+          Exit.isSuccess(parsed) &&
-+          parsed.value !== null &&
-+          typeof parsed.value === "object" &&
-+          Object.hasOwn(parsed.value, "initiatives");
+-      const file = decodeSettingsFile(yield* readRawConfig, managed);
++      const file = decodeSettingsFile(yield* readRawConfig, managed, Option.isSome(storedInitiatives));
++      hasLegacyInitiatives = file.hasLegacyInitiatives;
+       if (file.legacy !== undefined) {
+         legacyProviders = file.legacy.providers;
+         legacySourceControl = { bitbucket: file.legacy.bitbucket, github: file.legacy.github };
+@@ -851,6 +932,12 @@ const make = Effect.gen(function* () {
+         });
        }
      }
 +    if (Option.isSome(storedInitiatives)) {
@@ -358,7 +378,7 @@ index 66f0595a..366b0a43 100644
      // Settings saved by a server that kept the mode in `compactIdleThreads` move
      // it to `idleCompaction`, so that switch goes to clients as a boolean. The
      // defaults gain the field too, which tells clients this server reads modes.
-@@ -921,7 +1004,8 @@ const make = Effect.gen(function* () {
+@@ -948,7 +1035,8 @@ const make = Effect.gen(function* () {
      if (
        migrated !== loaded ||
        (settingsFileTrusted && legacyProviders !== undefined) ||
@@ -368,7 +388,7 @@ index 66f0595a..366b0a43 100644
      ) {
        yield* writeSettingsAtomically(migrated);
        for (const move of sourceControlMigration.secretMoves) {
-@@ -1191,6 +1275,7 @@ const make = Effect.gen(function* () {
+@@ -1218,6 +1306,7 @@ const make = Effect.gen(function* () {
    const updateAndPersistSettings = (
      patch: ServerSettingsPatch,
      update: (current: ServerSettings) => Effect.Effect<ServerSettings, ServerSettingsError>,
@@ -376,7 +396,7 @@ index 66f0595a..366b0a43 100644
    ): Effect.Effect<ServerSettings, ServerSettingsError> =>
      writeSemaphore.withPermits(1)(
        Effect.gen(function* () {
-@@ -1251,7 +1336,9 @@ const make = Effect.gen(function* () {
+@@ -1278,7 +1367,9 @@ const make = Effect.gen(function* () {
                yield* rollbackSecretChanges;
                return yield* Effect.failCause(materializedExit.cause);
              }
@@ -387,7 +407,7 @@ index 66f0595a..366b0a43 100644
              if (Exit.isFailure(writeExit)) {
                yield* rollbackSecretChanges;
                return yield* Effect.failCause(writeExit.cause);
-@@ -1351,12 +1438,13 @@ const make = Effect.gen(function* () {
+@@ -1361,12 +1452,13 @@ const make = Effect.gen(function* () {
      const revalidateAndEmitSafely = revalidateAndEmit.pipe(Effect.ignoreCause({ log: true }));
  
      // Watch symlink targets' directories for rewrites; re-resolve link changes to follow repointing.
@@ -403,7 +423,7 @@ index 66f0595a..366b0a43 100644
          return Option.none<string>();
        }
        yield* fs
-@@ -1369,7 +1457,7 @@ const make = Effect.gen(function* () {
+@@ -1379,7 +1471,7 @@ const make = Effect.gen(function* () {
      const linkTargetReady = yield* Deferred.make<void>();
      yield* Effect.gen(function* () {
        const [settingsEvents, resolveEvents] = yield* watchFileChanges(
@@ -412,7 +432,7 @@ index 66f0595a..366b0a43 100644
          settingsReady,
        ).pipe(
          Stream.ignoreCause({ log: true }),
-@@ -1403,6 +1491,11 @@ const make = Effect.gen(function* () {
+@@ -1413,6 +1505,11 @@ const make = Effect.gen(function* () {
      );
      // Edits made once `start` returns must reach a registered watch.
      yield* Deferred.await(linkTargetReady);
@@ -424,7 +444,7 @@ index 66f0595a..366b0a43 100644
    });
  
    const start = Effect.gen(function* () {
-@@ -1431,10 +1524,14 @@ const make = Effect.gen(function* () {
+@@ -1441,10 +1538,14 @@ const make = Effect.gen(function* () {
      ready: Deferred.await(startedDeferred),
      getSettings: getMaterializedSettings,
      updateSettings: (patch) =>

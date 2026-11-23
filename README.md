@@ -1,6 +1,6 @@
 # t3code-patches
 
-Focused initiative grouping patches for the official T3 Code Beta on macOS. The official application stays signed and unchanged; a separate launcher loads the rebuilt JavaScript into it.
+Focused initiative grouping patches for official T3 Code on macOS. The official application stays signed and unchanged; a separate launcher loads the rebuilt JavaScript into it.
 
 Enable **Settings → Labs → The KP Experience → Enable initiative management** for each environment. It is off by default; turning it off keeps saved groups and sessions. The server setting is `initiativeManagementEnabled`.
 
@@ -14,40 +14,30 @@ Grouping is stored in `initiatives.json` beside the environment’s `settings.js
 
 ## Build
 
-Install the official Beta, Git, and Python 3.9 or newer. From this checkout:
+Install Git and Python 3.9 or newer. From this checkout:
 
 ```sh
-./t3code-patches build
+./t3code-patches nightly-update
 ./t3code-patches status
 ./t3code-patches install-launcher
 ```
 
-Open **T3 Code (Patched Beta)** from Spotlight, or run `./t3code-patches launch`. It uses separate T3 and Chromium profiles under `~/.local/share/t3code-patches/`; it does not import or resume existing sessions. Keep the repository checkout at a stable path because the launcher references it. Run `install-launcher` again after updating launcher changes. It installs a foreground app with the Beta icon in `~/Applications` and registers it with macOS. You can drag that launcher from Finder into the Dock. The running window still belongs to the signed **T3 Code (Beta)** app; pinning its running Dock icon would reopen stock Beta without patches.
+Open the patched launcher from Spotlight or run `./t3code-patches launch`. Keep this checkout at a stable path because the launcher references it. The launcher uses the T3 and Chromium profiles under `~/.local/share/t3code-patches/`, including existing Patched Beta sessions. The running window belongs to the official app. Pin the launcher from Finder to the Dock to load the patches on subsequent launches.
 
-Validated base: official Beta `v0.1.11` (`59651c1761f6c63e9b6056839067066968e6a406`). Future releases must pass the patch, checks, and build again.
+Validated base: official Nightly `v0.1.12-nightly.20261123.5151` (`856b105fa23f`). For an exact validation build, use `nightly-update --version 0.1.12-nightly.20261123.5151` with a separate `--data-dir` placed before the command.
 
-The build reads Beta's exact source revision from its installed archive, applies `patches/*.patch`, installs frozen upstream dependencies, runs `checks.json`, and builds the web, server, and desktop bundles. It downloads the exact upstream Node version when needed, verified against Node's published checksum. Native helpers and public T3 Connect settings come from your official app.
-
-For a different app location or storage directory, put options before the command:
-
-```sh
-./t3code-patches --app '/path/to/T3 Code (Beta).app' --data-dir '/path/to/patch-data' build
-```
+The updater downloads the matching official macOS release, verifies its digest and Apple signing identity, and stages the app in a versioned directory. It resolves the app's exact embedded source revision, applies `patches/*.patch`, runs `checks.json`, and builds the web, server, and desktop bundles. The loader uses the official app's native helpers and public T3 Connect settings. It requires the `RunAsNode` and startup-inspector Electron fuses.
 
 ## Updates
 
-After updating the official Beta, run `./t3code-patches update`. Optional hourly checks, also triggered when the Beta app changes:
-
 ```sh
-./t3code-patches autoupdate on
+./t3code-patches autoupdate nightly
 ./t3code-patches autoupdate off
 ```
 
-The background job builds and stages only. It never starts or quits T3, ports patches with an agent, edits this repository, or pushes code. It builds the patches in the local checkout; pull reviewed repository updates yourself. Automatic app updates are disabled while the patched app is running, so update the official Beta separately.
+The hourly job follows official Nightly releases and uses the merged patch recipe from this repository's `main` branch. It checks and stages a matching app and overlay together. A failed update leaves the last working pair launchable. An already-running app keeps its current build until you quit and reopen it through the patched launcher.
 
-The loader requires Beta's `RunAsNode` and startup-inspector Electron fuses. It checks both before starting any process; incompatible Betas stop without falling back to stock.
-
-A failed patch, check, or build leaves the prior artifact intact. Launch refuses an artifact for a different official Beta or modified bundle. Restart through the patched launcher after a successful update; there is no fallback that silently opens the stock app against shared data. Logs are local: `~/.local/share/t3code-patches/update.log` and `runtime.log`.
+Add `--maintenance-thread <thread-id>` after `autoupdate nightly` to send failures and recoveries to a dedicated thread in this T3 environment. The job holds messages locally when T3 is closed and retries on the next run. It reports a patch failure once per release and retries that patch when the merged recipe changes. The maintenance agent can prepare a repair PR for review. Logs and status are in `update.log`, `runtime.log`, and `nightly-status.json` in the installation directory.
 
 ## Development
 
@@ -59,4 +49,4 @@ node --check macos/connect.mjs
 node --check macos/inject.cjs
 ```
 
-The ASAR reader, build approach, and macOS loader are adapted from [btsouth/t3code-customize](https://github.com/btsouth/t3code-customize), under its MIT license (Copyright © 2026 Tyler South). This project does not include its stats patches or Tim's customization collection. T3 Code itself is [pingdotgg/t3code](https://github.com/pingdotgg/t3code), built from the revision embedded in your installed app.
+The ASAR reader, build approach, and macOS loader are adapted from [btsouth/t3code-customize](https://github.com/btsouth/t3code-customize), under its MIT license (Copyright © 2026 Tyler South). This project does not include its stats patches or Tim's customization collection. T3 Code itself is [pingdotgg/t3code](https://github.com/pingdotgg/t3code), built from the revision embedded in the official app.

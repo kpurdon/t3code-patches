@@ -782,7 +782,7 @@ index 2cd1fec6..5b48a613 100644
    await expect
      .element(page.getByTestId("sidebar-settled-shelf-toggle"))
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index 06e4e74b..e6bcb943 100644
+index c5e12756..efa9e54e 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
 @@ -1,7 +1,9 @@
@@ -796,7 +796,7 @@ index 06e4e74b..e6bcb943 100644
  import { initiativeLayout } from "./InitiativeSidebar.logic";
  import { attachSidebarTree } from "../lib/sidebarTree";
  import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
-@@ -1053,6 +1055,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -1064,6 +1066,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
    const highlightedProjectScopeKeyRef = useRef<string | null>(null);
    // Hold dropped rows until server placement is confirmed; block another pickup from replacing the hold.
    const [optimisticDrop, setOptimisticDrop] = useState<SidebarOptimisticDrop | null>(null);
@@ -806,15 +806,15 @@ index 06e4e74b..e6bcb943 100644
    const threadSearchInputRef = useRef<HTMLInputElement>(null);
    const [threadSearchQuery, setThreadSearchQuery] = useState("");
    const [searchHighlightKey, setSearchHighlightKey] = useState<string | null>(null);
-@@ -3245,6 +3250,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3317,6 +3322,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                    </ComboboxPopup>
                  </Combobox>
                }
 +              newInitiativeAction={<NewInitiativeButton />}
-               onNewProject={openAddProjectCommandPalette}
                onNewThread={handleNewThreadClick}
                newThreadDisabled={projects.length === 0}
-@@ -3443,6 +3449,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+               newThreadShortcutLabel={newThreadShortcutLabel}
+@@ -3514,6 +3520,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                      )}
                    >
                      {(() => {
@@ -832,7 +832,7 @@ index 06e4e74b..e6bcb943 100644
                        const renderThreadRow = (
                          thread: EnvironmentThreadShell,
                          section: SidebarSection,
-@@ -3459,9 +3476,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3530,9 +3547,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            ? folderRowsMultiline
                              ? "folder-multiline"
                              : "folder"
@@ -847,7 +847,7 @@ index 06e4e74b..e6bcb943 100644
                          return (
                            <SortableThreadRow
                              key={threadKey}
-@@ -3569,7 +3588,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3638,7 +3657,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                          );
                        };
                        const from = isContextDrag ? null : (dragState?.activeSection ?? null);
@@ -855,8 +855,8 @@ index 06e4e74b..e6bcb943 100644
 +                      const looseItems: ReactNode[] = [
                          <SidebarDraftBlock
                            key="draft-sessions"
-                           projectByKey={projectByKey}
-@@ -3580,8 +3599,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                           draftIds={draftIds}
+@@ -3652,8 +3671,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            onDraftContextMenu={handleDraftContextMenu}
                          />,
                        ];
@@ -867,7 +867,7 @@ index 06e4e74b..e6bcb943 100644
                            key="initiatives"
                            threads={threads}
                            groups={initiatives.groups}
-@@ -3597,17 +3617,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3669,17 +3689,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              navigateToThread(scopeThreadRef(environmentId, id))
                            }
                          />,
@@ -890,7 +890,7 @@ index 06e4e74b..e6bcb943 100644
                                <SidebarProjectFolderHeader
                                  key={`project-folder:${folder.group.projectKey}`}
                                  group={folder.group}
-@@ -3619,7 +3641,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3691,7 +3713,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                />,
                              );
                              for (const thread of folder.threads) {
@@ -899,7 +899,7 @@ index 06e4e74b..e6bcb943 100644
                                  renderThreadRow(
                                    thread,
                                    "active",
-@@ -3632,7 +3654,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3704,7 +3726,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                          }
                          switch (item.marker) {
                            case "pinned-header":
@@ -908,7 +908,7 @@ index 06e4e74b..e6bcb943 100644
                                <SidebarDragBoundary
                                  key="pinned-header"
                                  marker="pinned-header"
-@@ -3643,7 +3665,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3715,7 +3737,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "pinned-divider":
@@ -917,7 +917,7 @@ index 06e4e74b..e6bcb943 100644
                                <SidebarDragBoundary
                                  key="pinned-divider"
                                  marker="pinned-divider"
-@@ -3654,7 +3676,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3726,7 +3748,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "active-placeholder":
@@ -926,7 +926,7 @@ index 06e4e74b..e6bcb943 100644
                                <SidebarSectionPlaceholder
                                  key="active-placeholder"
                                  marker="active-placeholder"
-@@ -3672,11 +3694,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3744,11 +3766,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "working-header":
@@ -940,7 +940,7 @@ index 06e4e74b..e6bcb943 100644
                                  label={gt("Working", { $context: "sidebar section" })}
                                  count={workingThreads.length}
                                  toggle={{
-@@ -3687,11 +3709,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3759,11 +3781,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "snoozed-header":
@@ -956,7 +956,7 @@ index 06e4e74b..e6bcb943 100644
                                  label={gt("Snoozed", { $context: "sidebar section" })}
                                  count={snoozedThreads.length}
                                  toggle={{
-@@ -3702,12 +3726,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3774,12 +3798,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "settled-header":
@@ -973,7 +973,7 @@ index 06e4e74b..e6bcb943 100644
                                  )}
                                  label={gt("Settled", { $context: "sidebar section" })}
                                  count={settledCount}
-@@ -3721,7 +3747,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3793,7 +3819,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "settled-placeholder":
@@ -982,7 +982,7 @@ index 06e4e74b..e6bcb943 100644
                                <SidebarSectionPlaceholder
                                  key="settled-placeholder"
                                  marker="settled-placeholder"
-@@ -3740,37 +3766,49 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3812,37 +3838,49 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              break;
                          }
                        }
@@ -1061,7 +1061,7 @@ index 06e4e74b..e6bcb943 100644
                    </ul>
                  </SortableContext>
                </DndContext>
-@@ -3778,6 +3816,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3850,6 +3888,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
            ) : null}
          </SidebarGroup>
        </SidebarContent>
@@ -1077,7 +1077,7 @@ index 06e4e74b..e6bcb943 100644
      </SidebarFolderDrop>
    );
 diff --git a/apps/web/src/components/sidebar/SidebarThreadHeader.tsx b/apps/web/src/components/sidebar/SidebarThreadHeader.tsx
-index 85836a5e..fc5b2f8a 100644
+index 185f8fc8..4187d7c2 100644
 --- a/apps/web/src/components/sidebar/SidebarThreadHeader.tsx
 +++ b/apps/web/src/components/sidebar/SidebarThreadHeader.tsx
 @@ -16,6 +16,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -1085,30 +1085,30 @@ index 85836a5e..fc5b2f8a 100644
    hasProjects: boolean;
    projectScope: ReactNode;
 +  newInitiativeAction?: ReactNode;
-   onNewProject: () => void;
    onNewThread: (event: ReactMouseEvent) => void;
    newThreadDisabled: boolean;
-@@ -35,6 +36,7 @@ export interface SidebarThreadHeaderProps {
+   newThreadShortcutLabel: string | null | undefined;
+@@ -34,6 +35,7 @@ export interface SidebarThreadHeaderProps {
  export function SidebarThreadHeader({
    hasProjects,
    projectScope,
 +  newInitiativeAction,
-   onNewProject,
    onNewThread,
    newThreadDisabled,
-@@ -107,6 +109,7 @@ export function SidebarThreadHeader({
-             </SidebarHeaderIconButton>
-           </>
-         ) : null}
+   newThreadShortcutLabel,
+@@ -98,6 +100,7 @@ export function SidebarThreadHeader({
+       </div>
+       <div className="flex shrink-0 items-center">
+         {hasProjects ? projectScope : null}
 +        {newInitiativeAction}
          <SidebarHeaderIconButton
            label={gt("New thread")}
            tooltip={
 diff --git a/apps/web/src/composerDraftStore.ts b/apps/web/src/composerDraftStore.ts
-index 3c64aa0f..c74b8026 100644
+index 07eca76d..a3f6ae23 100644
 --- a/apps/web/src/composerDraftStore.ts
 +++ b/apps/web/src/composerDraftStore.ts
-@@ -4696,12 +4696,37 @@ export function useComposerDraftModelState(
+@@ -4769,12 +4769,37 @@ export function useComposerDraftModelState(
    );
  }
  
@@ -1148,24 +1148,18 @@ index 3c64aa0f..c74b8026 100644
      ),
    );
 diff --git a/apps/web/src/hooks/useHandleNewThread.ts b/apps/web/src/hooks/useHandleNewThread.ts
-index 49e88126..c0144424 100644
+index ea9c42b2..300c0b91 100644
 --- a/apps/web/src/hooks/useHandleNewThread.ts
 +++ b/apps/web/src/hooks/useHandleNewThread.ts
-@@ -3,7 +3,12 @@ import {
-   scopeProjectRef,
-   scopeThreadRef,
- } from "@t3tools/client-runtime/environment";
--import { DEFAULT_SERVER_SETTINGS, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
-+import {
-+  DEFAULT_SERVER_SETTINGS,
-+  type ScopedProjectRef,
-+  type ThreadId,
-+  type ServerSettings,
-+} from "@t3tools/contracts";
- import { type AnyRouter, useRouter } from "@tanstack/react-router";
+@@ -6,6 +6,7 @@ import {
  import {
-   composerDraftHasUserContent,
-@@ -80,6 +85,46 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
+   DEFAULT_SERVER_SETTINGS,
+   type ScopedProjectRef,
++  type ServerSettings,
+   type T3ProjectFile,
+   type ThreadId,
+ } from "@t3tools/contracts";
+@@ -121,6 +122,46 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
    };
  }
  
@@ -1212,58 +1206,11 @@ index 49e88126..c0144424 100644
  export function useNewThreadHandler() {
    return createNewThreadHandler(useRouter());
  }
-@@ -197,39 +242,13 @@ export function createNewThreadHandler(router: AnyRouter) {
-           currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
-         destinationDraftId,
-       });
--    const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
--      // Environment queries wait for a connection, so reading the project file on an
--      // offline machine would never settle and the draft would never open.
--      const consultProjectFile =
--        project !== undefined &&
--        projectSettings.settings.defaultThreadEnvMode === null &&
--        appAtomRegistry
--          .get(environmentSummaries.connectedEnvironmentIdsAtom)
--          .includes(project.environmentId);
--      const projectFile = consultProjectFile
--        ? await readT3ProjectFile(project.environmentId, project.workspaceRoot)
--        : null;
--      return resolveNewThreadEnvMode({
--        projectSettings: resolveProjectSettings(
--          targetServerSettings,
--          project?.id ?? null,
--          project,
--          projectFile,
--        ),
--        workspaceRoot: project?.workspaceRoot ?? null,
--        newProjectsRoot: environmentServerConfigs.get(projectRef.environmentId)?.newProjectsRoot,
--        projectHasThreads:
--          readThreadShells().some(
--            (thread) =>
--              thread.environmentId === projectRef.environmentId &&
--              thread.projectId === projectRef.projectId,
--          ) ||
--          readUnloadedThreadCount(
--            [{ environmentId: projectRef.environmentId, id: projectRef.projectId }],
--            [],
--          ) > 0,
--      });
--    };
-+    const resolveDefaultEnvMode = () =>
-+      resolveDefaultNewThreadEnvMode(
-+        projectRef,
-+        project,
-+        targetServerSettings,
-+        environmentServerConfigs.get(projectRef.environmentId)?.newProjectsRoot,
-+      );
-     const logicalProjectKey = project
-       ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
-       : scopedProjectKey(projectRef);
 diff --git a/apps/web/test/fakeEnvironment.ts b/apps/web/test/fakeEnvironment.ts
-index 8dc0c44f..14a148e4 100644
+index 1894e681..d21c1f13 100644
 --- a/apps/web/test/fakeEnvironment.ts
 +++ b/apps/web/test/fakeEnvironment.ts
-@@ -432,6 +432,7 @@ let pendingDispatches: Array<{
+@@ -441,6 +441,7 @@ let pendingDispatches: Array<{
  }> = [];
  let pendingAssetUrls: Array<Deferred.Deferred<AssetCreateUrlResult>> = [];
  let acceptSettingsUpdates = false;
@@ -1271,7 +1218,7 @@ index 8dc0c44f..14a148e4 100644
  let settingsWrites: ServerSettingsPatch[] = [];
  const configSubscribers = new Set<Queue.Queue<ServerConfigStreamEvent>>();
  let sequence = 1;
-@@ -455,6 +456,13 @@ const handlers: Record<string, (input: never) => unknown> = {
+@@ -464,6 +465,13 @@ const handlers: Record<string, (input: never) => unknown> = {
      Effect.gen(function* () {
        if (!acceptSettingsUpdates) return yield* Effect.never;
        settingsWrites.push(patch);
@@ -1285,7 +1232,7 @@ index 8dc0c44f..14a148e4 100644
        const settings = applyServerSettingsPatch(serverConfig().settings, patch);
        configOverrides = { ...configOverrides, settings };
        yield* Effect.forEach(configSubscribers, (queue) =>
-@@ -628,6 +636,7 @@ export function installFakeEnvironment(
+@@ -637,6 +645,7 @@ export function installFakeEnvironment(
    options?: {
      readonly acceptCommands?: boolean;
      readonly acceptSettingsUpdates?: boolean;
@@ -1293,7 +1240,7 @@ index 8dc0c44f..14a148e4 100644
      readonly settings?: Partial<ServerConfig["settings"]>;
      readonly initiativeGroups?: boolean;
      readonly projects?: ReadonlyArray<OrchestrationProjectShell>;
-@@ -666,6 +675,7 @@ export function installFakeEnvironment(
+@@ -675,6 +684,7 @@ export function installFakeEnvironment(
    ];
    holdCommand = options?.holdCommand ?? (() => false);
    acceptSettingsUpdates = options?.acceptSettingsUpdates === true;
