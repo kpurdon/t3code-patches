@@ -1,0 +1,95 @@
+diff --git a/apps/desktop/src/app/DesktopConfig.ts b/apps/desktop/src/app/DesktopConfig.ts
+index ef2909045b..f5e916badf 100644
+--- a/apps/desktop/src/app/DesktopConfig.ts
++++ b/apps/desktop/src/app/DesktopConfig.ts
+@@ -38,6 +38,7 @@ export const DesktopConfig = Config.all({
+   xdgConfigHome: trimmedString("XDG_CONFIG_HOME"),
+   xdgDataHome: trimmedString("XDG_DATA_HOME"),
+   t3Home: trimmedString("T3CODE_HOME"),
++  profileDirectory: trimmedString("T3CODE_PROFILE_DIRECTORY"),
+   devServerUrl: Config.URL("VITE_DEV_SERVER_URL").pipe(Config.option),
+   appUserModelIdOverride: trimmedString("T3CODE_DESKTOP_APP_USER_MODEL_ID"),
+   devRemoteT3ServerEntryPath: trimmedString("T3CODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH"),
+diff --git a/apps/desktop/src/app/DesktopEnvironment.ts b/apps/desktop/src/app/DesktopEnvironment.ts
+index d5fed4b228..366d93600d 100644
+--- a/apps/desktop/src/app/DesktopEnvironment.ts
++++ b/apps/desktop/src/app/DesktopEnvironment.ts
+@@ -44,6 +44,7 @@ export class DesktopEnvironment extends Context.Service<
+     readonly resourcesPath: string;
+     readonly homeDirectory: string;
+     readonly appDataDirectory: string;
++    readonly profileDirectory: string | null;
+     readonly baseDir: string;
+     readonly stateDir: string;
+     readonly desktopSettingsPath: string;
+@@ -196,6 +197,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
+     resourcesPath,
+     homeDirectory,
+     appDataDirectory,
++    profileDirectory: Option.getOrNull(config.profileDirectory),
+     baseDir,
+     stateDir,
+     desktopSettingsPath: path.join(stateDir, "desktop-settings.json"),
+diff --git a/apps/desktop/src/app/DesktopUserData.test.ts b/apps/desktop/src/app/DesktopUserData.test.ts
+index 53e548bd1d..8f7bcc6bc7 100644
+--- a/apps/desktop/src/app/DesktopUserData.test.ts
++++ b/apps/desktop/src/app/DesktopUserData.test.ts
+@@ -138,3 +138,31 @@ it.effect("retries on the next launch when a GPU cache cannot be removed", () =>
+     assert.deepStrictEqual(writes, []);
+   }).pipe(Effect.provide(NodeServices.layer)),
+ );
++
++it.effect(
++  "uses an explicit absolute profile directory without reading the shared browser profile",
++  () =>
++    Effect.gen(function* () {
++      const fs = yield* FileSystem.FileSystem;
++      const path = yield* Path.Path;
++      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-patch-profile-" });
++      const profile = path.join(directory, "isolated");
++      assert.strictEqual(
++        yield* resolveUserDataPath({
++          appDataDirectory: directory,
++          profileDirectory: profile,
++          isDevelopment: false,
++          platform: "darwin",
++        }),
++        profile,
++      );
++      const rejected = yield* resolveUserDataPath({
++        appDataDirectory: directory,
++        profileDirectory: "relative",
++        isDevelopment: false,
++        platform: "darwin",
++      }).pipe(Effect.result);
++      assert.strictEqual(rejected._tag, "Failure");
++      assert.strictEqual(yield* fs.exists(path.join(directory, "t3code-v2")), false);
++    }).pipe(Effect.provide(NodeServices.layer)),
++);
+diff --git a/apps/desktop/src/app/DesktopUserData.ts b/apps/desktop/src/app/DesktopUserData.ts
+index 0124aa72e0..ecee6e90c6 100644
+--- a/apps/desktop/src/app/DesktopUserData.ts
++++ b/apps/desktop/src/app/DesktopUserData.ts
+@@ -34,11 +34,22 @@ export class DesktopUserDataInitializationError extends Schema.TaggedError<Deskt
+ export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPath")(
+   function* (input: {
+     readonly appDataDirectory: string;
++    readonly profileDirectory?: string | null;
+     readonly isDevelopment: boolean;
+     readonly platform: NodeJS.Platform;
+   }) {
+     const fs = yield* FileSystem.FileSystem;
+     const path = yield* Path.Path;
++    if (input.profileDirectory) {
++      if (!path.isAbsolute(input.profileDirectory))
++        return yield* new DesktopUserDataInitializationError({
++          operation: "inspect",
++          resourcePath: input.profileDirectory,
++          category: "profile directory must be absolute",
++          cause: new Error("Relative profile path refused"),
++        });
++      return input.profileDirectory;
++    }
+     const names = input.isDevelopment
+       ? { current: "t3code-dev", legacy: "T3 Code (Dev)" }
+       : { current: "t3code-v2", legacy: "T3 Code (Alpha)" };
