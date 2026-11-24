@@ -1,0 +1,1417 @@
+diff --git a/apps/server/src/serverSettings.test.ts b/apps/server/src/serverSettings.test.ts
+index e8efe5d2f9..ca1843fcfb 100644
+--- a/apps/server/src/serverSettings.test.ts
++++ b/apps/server/src/serverSettings.test.ts
+@@ -15,6 +15,7 @@ import {
+   SecretProviderId,
+   ServerSettings,
+   ServerSettingsPatch,
++  ThreadId,
+   UsageLimitSourceId,
+   type SimlockDeviceHostConfig,
+ } from "@t3tools/contracts";
+@@ -139,6 +140,111 @@ function strictSecretReferencePaths(
+ }
+ 
+ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings", (it) => {
++  it.effect("migrates saved initiatives to named groups and never resurrects removed groups", () =>
++    Effect.gen(function* () {
++      const service = yield* ServerSettingsModule.ServerSettingsService;
++      const config = yield* ServerConfig.ServerConfig;
++      const fs = yield* FileSystem.FileSystem;
++      const path = yield* Path.Path;
++      const legacyPath = path.join(path.dirname(config.settingsPath), "initiatives.json");
++      const legacy = JSON.stringify({
++        jobs: {
++          name: "Jobs rollout",
++          coordinatorThreadId: "lead",
++          memberThreadIds: ["worker", "worker"],
++        },
++      });
++      yield* fs.writeFileString(
++        config.settingsPath,
++        JSON.stringify({
++          responseStreamingMode: "turn",
++          initiatives: { obsolete: { name: "Obsolete", memberThreadIds: [] } },
++        }),
++      );
++      yield* fs.writeFileString(legacyPath, legacy);
++
++      const groups = (yield* service.getSettings).threadGroups;
++      assert.deepEqual(groups, {
++        jobs: {
++          name: "Jobs rollout",
++          memberThreadIds: [ThreadId.make("lead"), ThreadId.make("worker")],
++        },
++      });
++      yield* service.updateSettings({
++        threadGroupChange: { action: "delete", id: "jobs" },
++      });
++      const saved = yield* decodeServerSettingsJson(yield* fs.readFileString(config.settingsPath));
++      assert.deepEqual(saved.threadGroups, {});
++      assert.equal(saved.responseStreamingMode, "turn");
++      assert.equal(yield* fs.readFileString(legacyPath), legacy);
++      yield* service.updateSettings({ responseStreamingMode: "paragraph" });
++      assert.deepEqual((yield* service.getSettings).threadGroups, {});
++    }).pipe(Effect.provide(layerServerSettings())),
++  );
++
++  it.effect(
++    "recovers legacy groups after a read failure without accepting a premature group edit",
++    () =>
++      Effect.gen(function* () {
++        const service = yield* ServerSettingsModule.ServerSettingsService;
++        const config = yield* ServerConfig.ServerConfig;
++        const fs = yield* FileSystem.FileSystem;
++        const path = yield* Path.Path;
++        const legacyPath = path.join(path.dirname(config.settingsPath), "initiatives.json");
++        yield* fs.writeFileString(legacyPath, "{ bad JSON");
++        const create = service.updateSettings({
++          threadGroupChange: { action: "create", id: "ideas", name: "Ideas" },
++        });
++        const error = yield* Effect.flip(create);
++        assert.equal(error.settingsPath, legacyPath);
++        assert.isNull(
++          (yield* service.updateSettings({ responseStreamingMode: "turn" })).threadGroups,
++        );
++
++        yield* fs.writeFileString(
++          legacyPath,
++          JSON.stringify({
++            old: { name: "Prior work", coordinatorThreadId: "lead", memberThreadIds: ["worker"] },
++          }),
++        );
++        assert.deepEqual((yield* create).threadGroups, {
++          old: {
++            name: "Prior work",
++            memberThreadIds: [ThreadId.make("lead"), ThreadId.make("worker")],
++          },
++          ideas: { name: "Ideas", memberThreadIds: [] },
++        });
++      }).pipe(Effect.provide(layerServerSettings())),
++  );
++
++  it.effect("uses inline legacy groups and serializes independent membership moves", () =>
++    Effect.gen(function* () {
++      const service = yield* ServerSettingsModule.ServerSettingsService;
++      const config = yield* ServerConfig.ServerConfig;
++      const fs = yield* FileSystem.FileSystem;
++      yield* fs.writeFileString(
++        config.settingsPath,
++        JSON.stringify({
++          initiatives: {
++            first: { name: "First", coordinatorThreadId: null, memberThreadIds: ["one", "two"] },
++            second: { name: "Second", coordinatorThreadId: null, memberThreadIds: [] },
++          },
++        }),
++      );
++      yield* Effect.forEach(
++        ["one", "two"],
++        (id) =>
++          service.updateSettings({
++            threadGroupChange: { action: "assign", id: "second", threadId: ThreadId.make(id) },
++          }),
++        { concurrency: "unbounded" },
++      );
++      const groups = (yield* service.getSettings).threadGroups;
++      assert.deepEqual(groups?.first, { name: "First", memberThreadIds: [] });
++      assert.deepEqual([...(groups?.second?.memberThreadIds ?? [])].sort(), ["one", "two"]);
++    }).pipe(Effect.provide(layerServerSettings())),
++  );
++
+   it.effect("serializes concurrent model preference edits without cancelling duplicate adds", () =>
+     Effect.gen(function* () {
+       const service = yield* ServerSettingsModule.ServerSettingsService;
+diff --git a/apps/server/src/serverSettings.ts b/apps/server/src/serverSettings.ts
+index 822254afcc..b1092412fa 100644
+--- a/apps/server/src/serverSettings.ts
++++ b/apps/server/src/serverSettings.ts
+@@ -16,6 +16,8 @@ import {
+   ServerSettings,
+   ServerSettingsError,
+   type ServerSettingsPatch,
++  ThreadGroups,
++  ThreadId,
+   type ManagedPolicySummary,
+   globalIdleCompaction,
+   isSecretReference,
+@@ -37,6 +39,7 @@ import * as Option from "effect/Option";
+ import * as Path from "effect/Path";
+ import * as PubSub from "effect/PubSub";
+ import * as Ref from "effect/Ref";
++import * as Result from "effect/Result";
+ import * as Schema from "effect/Schema";
+ import * as SchemaTransformation from "effect/SchemaTransformation";
+ import * as Semaphore from "effect/Semaphore";
+@@ -396,9 +399,21 @@ export const readServerSettingsFromDisk = Effect.gen(function* () {
+     Option.isNone(raw) ? managed.defaults : decodeSettingsFile(raw.value, managed).settings,
+   );
+ }).pipe(Effect.withSpan("ServerSettings.readServerSettingsFromDisk"));
++const LegacyInitiatives = Schema.Record(
++  Schema.String,
++  Schema.Struct({
++    name: Schema.String,
++    memberThreadIds: Schema.Array(ThreadId),
++    coordinatorThreadId: Schema.optionalKey(Schema.NullOr(ThreadId)),
++  }),
++);
++const decodeLegacyInitiatives = Schema.decodeUnknownEffect(LegacyInitiatives);
++const decodeThreadGroups = Schema.decodeUnknownEffect(ThreadGroups);
++
+ const LegacyProviderSettingsJson = fromLenientJson(
+   Schema.Struct({
+     providers: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
++    initiatives: Schema.optionalKey(Schema.Unknown),
+     bitbucket: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+     github: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+   }),
+@@ -833,8 +848,55 @@ const make = Effect.gen(function* () {
+     },
+   );
+ 
++  const legacyInitiativesPath = pathService.join(
++    pathService.dirname(settingsPath),
++    "initiatives.json",
++  );
++  const legacyReadError = (filePath: string) => (cause: unknown) =>
++    new ServerSettingsError({ settingsPath: filePath, operation: "read-file", cause });
++  const readLegacyThreadGroups = Effect.fn("serverSettings.readLegacyThreadGroups")(function* (
++    inline: unknown,
++  ) {
++    const hasFile = yield* fs
++      .exists(legacyInitiativesPath)
++      .pipe(Effect.mapError(legacyReadError(legacyInitiativesPath)));
++    const raw = hasFile
++      ? fs
++          .readFileString(legacyInitiativesPath)
++          .pipe(Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))))
++      : Effect.succeed(inline);
++    return yield* Effect.gen(function* () {
++      const legacy = yield* raw;
++      if (legacy === undefined) return null;
++      const groups = yield* decodeLegacyInitiatives(legacy);
++      const assigned = new Set<ThreadId>();
++      return yield* decodeThreadGroups(
++        Object.fromEntries(
++          Object.entries(groups).map(([id, group]) => {
++            const members =
++              group.coordinatorThreadId == null
++                ? group.memberThreadIds
++                : [group.coordinatorThreadId, ...group.memberThreadIds];
++            return [
++              id,
++              {
++                name: group.name,
++                memberThreadIds: members.filter((threadId) => {
++                  if (assigned.has(threadId)) return false;
++                  assigned.add(threadId);
++                  return true;
++                }),
++              },
++            ];
++          }),
++        ),
++      );
++    }).pipe(Effect.mapError(legacyReadError(hasFile ? legacyInitiativesPath : settingsPath)));
++  });
++
+   const loadSettingsFromDisk = Effect.gen(function* () {
+     let settings = managed.defaults;
++    let legacyInitiatives: unknown;
+     let legacyProviders: Readonly<Record<string, unknown>> | undefined;
+     let legacySourceControl: Parameters<typeof migrateLegacySourceControlSettings>[1] = {};
+     let parseFailure = Option.none<unknown>();
+@@ -842,6 +904,7 @@ const make = Effect.gen(function* () {
+     if (yield* readConfigExists) {
+       const file = decodeSettingsFile(yield* readRawConfig, managed);
+       if (file.legacy !== undefined) {
++        legacyInitiatives = file.legacy.initiatives;
+         legacyProviders = file.legacy.providers;
+         legacySourceControl = { bitbucket: file.legacy.bitbucket, github: file.legacy.github };
+       }
+@@ -855,6 +918,21 @@ const make = Effect.gen(function* () {
+         });
+       }
+     }
++    const legacyGroupMigration =
++      Option.isNone(parseFailure) && settings.threadGroups === null
++        ? yield* Effect.result(readLegacyThreadGroups(legacyInitiatives))
++        : Result.succeed(null);
++    const threadGroupMigrationFailure = Result.isFailure(legacyGroupMigration)
++      ? legacyGroupMigration.failure
++      : null;
++    if (threadGroupMigrationFailure !== null) {
++      yield* Effect.logWarning("Could not migrate legacy thread groups", {
++        cause: threadGroupMigrationFailure,
++      });
++      if (threadGroupMigrationFailure.settingsPath === settingsPath) {
++        parseFailure = Option.some(threadGroupMigrationFailure.cause);
++      }
++    }
+     // Settings saved by a server that kept the mode in `compactIdleThreads` move
+     // it to `idleCompaction`, so that switch goes to clients as a boolean. The
+     // defaults gain the field too, which tells clients this server reads modes.
+@@ -946,8 +1024,15 @@ const make = Effect.gen(function* () {
+     const sourceControlMigration = hasLegacySourceControl
+       ? migrateLegacySourceControlSettings(folded, legacySourceControl)
+       : { settings: folded, secretMoves: [] };
++    const legacyGroups = Result.isSuccess(legacyGroupMigration)
++      ? legacyGroupMigration.success
++      : null;
++    const migratedSettings =
++      legacyGroups === null
++        ? sourceControlMigration.settings
++        : { ...sourceControlMigration.settings, threadGroups: legacyGroups };
+     const migrated = settingsFileTrusted
+-      ? yield* moveInlineSettingsSecrets(sourceControlMigration.settings)
++      ? yield* moveInlineSettingsSecrets(migratedSettings)
+       : folded;
+     if (
+       migrated !== loaded ||
+@@ -959,7 +1044,7 @@ const make = Effect.gen(function* () {
+         yield* secretStore.remove(move.from).pipe(Effect.ignore);
+       }
+     }
+-    return { settings: migrated, parseFailure };
++    return { settings: migrated, parseFailure, threadGroupMigrationFailure };
+   });
+ 
+   const settingsCache = yield* Cache.makeWith((_key: typeof cacheKey) => loadSettingsFromDisk, {
+@@ -1225,7 +1310,14 @@ const make = Effect.gen(function* () {
+   ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+     writeSemaphore.withPermits(1)(
+       Effect.gen(function* () {
+-        const { settings: current, parseFailure } = yield* reloadSettings;
++        const {
++          settings: current,
++          parseFailure,
++          threadGroupMigrationFailure,
++        } = yield* reloadSettings;
++        if (patch.threadGroupChange !== undefined && threadGroupMigrationFailure !== null) {
++          return yield* threadGroupMigrationFailure;
++        }
+         if (Option.isSome(parseFailure)) {
+           return yield* new ServerSettingsError({
+             settingsPath,
+@@ -1290,7 +1382,11 @@ const make = Effect.gen(function* () {
+             return materializedExit.value;
+           }).pipe(Effect.ensuring(invalidateMaterialized)),
+         );
+-        yield* Cache.set(settingsCache, cacheKey, { settings: next, parseFailure: Option.none() });
++        yield* Cache.set(settingsCache, cacheKey, {
++          settings: next,
++          parseFailure: Option.none(),
++          threadGroupMigrationFailure,
++        });
+         const resolved = toEffective(materializedNext);
+         materialized = { source: next, value: resolved };
+         yield* emitChange(next);
+diff --git a/apps/server/src/ws.ts b/apps/server/src/ws.ts
+index 7ffce48991..711ec98c5d 100644
+--- a/apps/server/src/ws.ts
++++ b/apps/server/src/ws.ts
+@@ -1945,6 +1945,7 @@ export const layerWsRpc = (
+             : { managedPolicy: serverSettings.managedPolicy }),
+           shellResumeCompletionMarker: true,
+           shellThreadFamilies: true,
++          namedThreadGroups: true,
+           threadLinkMetadata: true,
+           shellOlderSettled: true,
+           threadResumeCompletionMarker: true,
+diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
+index 8d308d501d..1a51b801b3 100644
+--- a/apps/web/src/components/Sidebar.tsx
++++ b/apps/web/src/components/Sidebar.tsx
+@@ -130,6 +130,7 @@ import {
+   useAcknowledgeThreadWoke,
+   useThreadActions,
+ } from "../hooks/useThreadActions";
++import { isGroupMenuAction, useNamedThreadGroupActions } from "../hooks/useNamedThreadGroupActions";
+ import { useHandleNewThread } from "../hooks/useHandleNewThread";
+ import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
+ import { useProjectPin } from "../hooks/useProjectGroupUpdate";
+@@ -258,6 +259,10 @@ import {
+ } from "./ui/combobox";
+ import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
+ import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
++import {
++  groupNamedSidebarThreads,
++  SidebarNamedThreadGroupHeader,
++} from "./sidebar/SidebarNamedThreadGroups";
+ import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+ import { TooltipProvider } from "./ui/tooltip";
+ import {
+@@ -541,28 +546,39 @@ function useSidebarThreads(input: {
+   const visibleWorkingThreads = workingShelfExpanded
+     ? workingThreads
+     : routeThreadOnly(workingThreads, routeRowThreadKey);
++  const folderLayout = (keys: readonly string[], threads: readonly EnvironmentThreadShell[]) => {
++    const collapsed = !resolveProjectExpanded(projectExpandedById, keys);
++    return {
++      collapsed,
++      threads: collapsed ? routeThreadOnly(threads, routeRowThreadKey) : threads,
++      hiddenThreads: collapsed
++        ? threads.filter((thread) => threadShellKey(thread) !== routeRowThreadKey)
++        : EMPTY_THREADS,
++    };
++  };
++  const named =
++    folderGroups === null
++      ? null
++      : groupNamedSidebarThreads(serverConfigs, activeThreads, scopedProjectKeys !== null);
++  const namedFolders =
++    named?.folders.map(({ group, threads }) => ({
++      group,
++      ...folderLayout([group.key], threads),
++    })) ?? [];
+   const projectFolders =
+     folderGroups === null
+       ? null
+-      : groupSidebarThreadsByProject(folderGroups, activeThreads, keepEmpty).map((folder) => {
+-          const collapsed = !resolveProjectExpanded(
+-            projectExpandedById,
+-            sidebarFolderExpansionKeys(folder.group),
+-          );
+-          return {
+-            group: folder.group,
+-            collapsed,
+-            // A closed folder still shows the open thread, and hints at the rest.
+-            threads: collapsed
+-              ? routeThreadOnly(folder.threads, routeRowThreadKey)
+-              : folder.threads,
+-            hiddenThreads: collapsed
+-              ? folder.threads.filter((thread) => threadShellKey(thread) !== routeRowThreadKey)
+-              : EMPTY_THREADS,
+-          };
++      : groupSidebarThreadsByProject(
++          folderGroups,
++          named?.projectThreads ?? activeThreads,
++          keepEmpty,
++        ).map((folder) => {
++          const keys = sidebarFolderExpansionKeys(folder.group);
++          return { group: folder.group, ...folderLayout(keys, folder.threads) };
+         });
+   const orderedThreads = [
+     ...pinnedThreads,
++    ...namedFolders.flatMap((folder) => folder.threads),
+     ...(projectFolders === null
+       ? activeThreads
+       : projectFolders.flatMap((folder) => folder.threads)),
+@@ -606,6 +622,9 @@ function useSidebarThreads(input: {
+     toggleSnoozedShelf: () => setSnoozedShelfExpanded((value) => !value),
+     workingShelfExpanded,
+     toggleWorkingShelf: () => setWorkingShelfExpanded((value) => !value),
++    namedFolders,
++    toggleNamedFolder: (key: string) =>
++      setProjectExpanded(key, !resolveProjectExpanded(projectExpandedById, [key])),
+     projectFolders,
+     toggleProjectFolder: (group: SidebarProjectSnapshot) => {
+       const keys = sidebarFolderExpansionKeys(group);
+@@ -1004,6 +1023,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+     },
+   });
+   const boringSidebarEnabled = useClientSettings((settings) => settings.boringSidebarEnabled);
++  const namedThreadGroups = useNamedThreadGroupActions(boringSidebarEnabled);
+   const folderRowsMultiline = useClientSettings((settings) => settings.boringSidebarMultilineRows);
+   const newThreadContext = useHandleNewThread();
+   // Row callbacks capture only the handler; the rest of the context changes with the route.
+@@ -1350,6 +1370,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+     toggleSnoozedShelf,
+     workingShelfExpanded,
+     toggleWorkingShelf,
++    namedFolders,
++    toggleNamedFolder,
+     projectFolders,
+     toggleProjectFolder,
+     renderedSettledThreads,
+@@ -1984,7 +2006,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+         event.activatorEvent instanceof PointerEvent ? event.activatorEvent.clientY : null,
+     });
+   };
+-  const hasProjectFolders = projectFolders !== null && projectFolders.length > 0;
++  const hasFolders = namedFolders.length > 0 || (projectFolders?.length ?? 0) > 0;
+   const sidebarListItemsFresh = ((): readonly SidebarListItem[] => {
+     const rowsOf = (
+       list: readonly EnvironmentThreadShell[],
+@@ -1996,7 +2018,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+       });
+     // Boring mode keeps a pinned open project or one the user filtered to, so it can start a thread.
+     if (
+-      !hasProjectFolders &&
++      !hasFolders &&
+       pinnedThreads.length +
+         activeThreads.length +
+         workingThreads.length +
+@@ -2052,6 +2074,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+   // Only order, section, or draft changes need layout reads and motion.
+   const listMotionLayoutKey = [
+     sidebarListItemsKey,
++    namedFolders
++      .map(({ group, threads }) => [group.key, ...threads.map(threadShellKey)])
++      .join("\n"),
+     projectFolders
+       ?.map((folder) => `${folder.group.projectKey}:${folder.threads.length}`)
+       .join("\n") ?? "",
+@@ -2707,49 +2732,57 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                 projectRef.projectId === thread.projectId,
+             ),
+           ) ?? null;
++        const groupMenu = namedThreadGroups.menuItem(threadRef);
+         const clicked = await settlePromise(() =>
+           api.contextMenu.show(
+-            buildThreadActionMenuItems({
+-              canOperate: readEnvironmentScope(
+-                threadRef.environmentId,
+-                AuthOrchestrationOperateScope,
+-              ),
+-              branch: thread.branch ?? null,
+-              // An archived project is not a filter choice.
+-              projectFilter:
+-                threadProjectGroup && !threadProjectGroup.archived
+-                  ? {
+-                      label: threadProjectGroup.displayName,
+-                      isActive: projectScopeKeys.includes(threadProjectGroup.projectKey),
+-                    }
+-                  : null,
+-              isPinned,
+-              isSettled,
+-              autoSettleEnabled: thread.autoSettleDisabledAt == null,
+-              isSnoozed,
+-              canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
+-              isRegeneratingTitle,
+-              isRunning: !threadRuntimeCanArchive(thread.runtime),
+-              hasCompletedRun: thread.latestRun?.completedAt != null,
+-              canShareWithGuest: appAtomRegistry.get(
+-                canShareWithGuestAtom(threadRef.environmentId),
+-              ),
+-              canTurnIntoProject: canTurnThreadIntoProject(threadRef),
+-              canRename: !fromSearch,
+-              supports: {
+-                settlement: configLoaded,
+-                autoSettleOptOut: supportsAutoSettleOptOut,
+-                snooze: configLoaded,
+-                pinning: configLoaded,
+-                titleRegeneration: configLoaded,
+-              },
+-              snoozePresets,
+-            }),
++            [
++              ...buildThreadActionMenuItems({
++                canOperate: readEnvironmentScope(
++                  threadRef.environmentId,
++                  AuthOrchestrationOperateScope,
++                ),
++                branch: thread.branch ?? null,
++                // An archived project is not a filter choice.
++                projectFilter:
++                  threadProjectGroup && !threadProjectGroup.archived
++                    ? {
++                        label: threadProjectGroup.displayName,
++                        isActive: projectScopeKeys.includes(threadProjectGroup.projectKey),
++                      }
++                    : null,
++                isPinned,
++                isSettled,
++                autoSettleEnabled: thread.autoSettleDisabledAt == null,
++                isSnoozed,
++                canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
++                isRegeneratingTitle,
++                isRunning: !threadRuntimeCanArchive(thread.runtime),
++                hasCompletedRun: thread.latestRun?.completedAt != null,
++                canShareWithGuest: appAtomRegistry.get(
++                  canShareWithGuestAtom(threadRef.environmentId),
++                ),
++                canTurnIntoProject: canTurnThreadIntoProject(threadRef),
++                canRename: !fromSearch,
++                supports: {
++                  settlement: configLoaded,
++                  autoSettleOptOut: supportsAutoSettleOptOut,
++                  snooze: configLoaded,
++                  pinning: configLoaded,
++                  titleRegeneration: configLoaded,
++                },
++                snoozePresets,
++              }),
++              ...(groupMenu === null ? [] : [groupMenu]),
++            ],
+             position,
+             source,
+           ),
+         );
+         if (clicked._tag === "Failure" || clicked.value === null) return;
++        if (isGroupMenuAction(clicked.value)) {
++          await namedThreadGroups.handleThreadMenu(clicked.value, threadRef);
++          return;
++        }
+         if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
+         if (clicked.value?.startsWith("snooze:")) {
+           const preset =
+@@ -3071,6 +3104,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+   return (
+     <SidebarFolderDrop>
+       <SidebarChromeHeader isElectron={isElectron} />
++      {namedThreadGroups.dialog}
+       <SidebarContent
+         ref={sidebarContentRef}
+         className="min-h-full"
+@@ -3078,6 +3112,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+           <SidebarGroup className="z-[1]">
+             <SidebarThreadHeader
+               hasProjects={projectGroups.length > 0}
++              groupAction={namedThreadGroups.createButton(serverConfigs, environmentLabelById)}
+               projectScope={
+                 <Combobox
+                   items={projectScopeItems}
+@@ -3412,7 +3447,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+           ) : null}
+           {/* A scope can hide every active thread; say so even when its project still has settled ones. */}
+           {!isSearchingThreads &&
+-          !hasProjectFolders &&
++          !hasFolders &&
+           visibleDraftSessionCount === 0 &&
+           pinnedThreads.length +
+             activeThreads.length +
+@@ -3638,6 +3673,32 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+                           continue;
+                         }
+                         if (projectFolders !== null && item.marker === "active-placeholder") {
++                          for (const folder of namedFolders) {
++                            items.push(
++                              <SidebarNamedThreadGroupHeader
++                                key={folder.group.key}
++                                group={folder.group}
++                                collapsed={folder.collapsed}
++                                hiddenThreads={folder.hiddenThreads}
++                                onToggle={() => toggleNamedFolder(folder.group.key)}
++                                onMenu={
++                                  namedThreadGroups.canEdit(folder.group.environmentId)
++                                    ? (event) =>
++                                        void namedThreadGroups.handleGroupMenu(folder.group, event)
++                                    : undefined
++                                }
++                              />,
++                            );
++                            for (const thread of folder.threads) {
++                              items.push(
++                                renderThreadRow(
++                                  thread,
++                                  "active",
++                                  sidebarFolderRowId(folder.group.key),
++                                ),
++                              );
++                            }
++                          }
+                           for (const folder of projectFolders) {
+                             items.push(
+                               <SidebarProjectFolderHeader
+diff --git a/apps/web/src/components/settings/LabsSettingsPanel.tsx b/apps/web/src/components/settings/LabsSettingsPanel.tsx
+index 63782523ea..877d6ea772 100644
+--- a/apps/web/src/components/settings/LabsSettingsPanel.tsx
++++ b/apps/web/src/components/settings/LabsSettingsPanel.tsx
+@@ -73,7 +73,7 @@ function BoringSidebarRow() {
+     <SettingsRow
+       {...searchableSetting("boring-sidebar")}
+       description={gt(
+-        "Group sidebar threads into project folders. Pinned threads stay on top, and Snoozed and Settled stay below the folders.",
++        "Group active threads into named groups and project folders. Pinned threads stay on top, and Snoozed and Settled stay below the folders.",
+       )}
+       control={
+         <Switch
+diff --git a/apps/web/src/components/sidebar/SidebarNamedThreadGroups.tsx b/apps/web/src/components/sidebar/SidebarNamedThreadGroups.tsx
+new file mode 100644
+index 0000000000..cacf91aa86
+--- /dev/null
++++ b/apps/web/src/components/sidebar/SidebarNamedThreadGroups.tsx
+@@ -0,0 +1,167 @@
++import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
++import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
++import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
++import type { EnvironmentId, ThreadGroups, ThreadId } from "@t3tools/contracts";
++import { useGT } from "gt-react";
++import { EllipsisIcon, FolderIcon } from "lucide-react";
++import { useId, useState, type MouseEvent } from "react";
++import { Button } from "../ui/button";
++import {
++  Dialog,
++  DialogFooter,
++  DialogHeader,
++  DialogPanel,
++  DialogPopup,
++  DialogTitle,
++} from "../ui/dialog";
++import { Input } from "../ui/input";
++import { Label } from "../ui/label";
++import { SidebarFolderHeader, sidebarFolderRowId } from "./SidebarProjectFolderHeader";
++
++export type ServerConfigs = ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
++
++export interface NamedThreadGroup {
++  readonly environmentId: EnvironmentId;
++  readonly id: string;
++  readonly key: string;
++  readonly name: string;
++  readonly members: readonly ThreadId[];
++}
++
++const NO_GROUPS: ThreadGroups = {};
++
++export function namedThreadGroupsIn(
++  config: EnvironmentServerConfig | undefined,
++): ThreadGroups | null {
++  if (config === undefined || config.namedThreadGroups !== true) return null;
++  return config.settings.threadGroups ?? NO_GROUPS;
++}
++
++export function groupNamedSidebarThreads(
++  configs: ServerConfigs,
++  activeThreads: readonly EnvironmentThreadShell[],
++  filtered: boolean,
++) {
++  const groups = new Map<string, { group: NamedThreadGroup; threads: EnvironmentThreadShell[] }>();
++  const membership = new Map<string, string>();
++  for (const [environmentId, config] of configs) {
++    const configuredGroups = namedThreadGroupsIn(config);
++    if (configuredGroups === null) continue;
++    for (const [id, group] of Object.entries(configuredGroups)) {
++      const key = `named-thread-group:${JSON.stringify([environmentId, id])}`;
++      groups.set(key, {
++        group: { environmentId, id, key, name: group.name, members: group.memberThreadIds },
++        threads: [],
++      });
++      for (const threadId of group.memberThreadIds) {
++        membership.set(scopedThreadKey(scopeThreadRef(environmentId, threadId)), key);
++      }
++    }
++  }
++  const projectThreads = activeThreads.filter((thread) => {
++    const key = membership.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)));
++    if (key === undefined) return true;
++    groups.get(key)!.threads.push(thread);
++    return false;
++  });
++  const folders = [...groups.values()].filter(
++    ({ group, threads }) => !filtered || threads.length > 0 || group.members.length === 0,
++  );
++  return { folders, projectThreads };
++}
++
++export function ThreadGroupNameDialog(props: {
++  initialName: string | null;
++  onClose: () => void;
++  onSave: (name: string) => Promise<void>;
++}) {
++  const gt = useGT();
++  const inputId = useId();
++  const [name, setName] = useState(props.initialName ?? "");
++  const [saving, setSaving] = useState(false);
++  return (
++    <Dialog
++      open
++      onOpenChange={(open) => {
++        if (!open && !saving) props.onClose();
++      }}
++    >
++      <DialogPopup>
++        <DialogHeader>
++          <DialogTitle>
++            {props.initialName !== null ? gt("Rename group") : gt("New group")}
++          </DialogTitle>
++        </DialogHeader>
++        <DialogPanel>
++          <form
++            id={`${inputId}-form`}
++            className="flex flex-col gap-2"
++            onSubmit={async (event) => {
++              event.preventDefault();
++              if (!name.trim() || saving) return;
++              setSaving(true);
++              try {
++                await props.onSave(name.trim());
++              } finally {
++                setSaving(false);
++              }
++            }}
++          >
++            <Label htmlFor={inputId}>{gt("Group name")}</Label>
++            <Input
++              id={inputId}
++              value={name}
++              maxLength={120}
++              onChange={(event) => setName(event.currentTarget.value)}
++              disabled={saving}
++            />
++          </form>
++        </DialogPanel>
++        <DialogFooter>
++          <Button type="button" variant="outline" onClick={props.onClose} disabled={saving}>
++            {gt("Cancel")}
++          </Button>
++          <Button type="submit" form={`${inputId}-form`} disabled={!name.trim() || saving}>
++            {props.initialName !== null ? gt("Save") : gt("Create")}
++          </Button>
++        </DialogFooter>
++      </DialogPopup>
++    </Dialog>
++  );
++}
++
++export function SidebarNamedThreadGroupHeader(props: {
++  group: NamedThreadGroup;
++  collapsed: boolean;
++  hiddenThreads: readonly EnvironmentThreadShell[];
++  onToggle: () => void;
++  onMenu?: ((event: MouseEvent) => void) | undefined;
++}) {
++  const gt = useGT();
++  const rowId = sidebarFolderRowId(props.group.key);
++  return (
++    <SidebarFolderHeader
++      rowId={rowId}
++      testId="sidebar-named-thread-group"
++      name={props.group.name}
++      icon={<FolderIcon className="size-4 shrink-0" aria-hidden />}
++      collapsed={props.collapsed}
++      hiddenThreads={props.hiddenThreads}
++      onToggle={props.onToggle}
++      onContextMenu={props.onMenu}
++      action={
++        props.onMenu === undefined ? undefined : (
++          <Button
++            data-sidebar-action-for={rowId}
++            size="icon-xs"
++            variant="ghost-muted"
++            aria-label={gt("Manage {group}", { group: props.group.name })}
++            onClick={props.onMenu}
++          >
++            <EllipsisIcon aria-hidden />
++          </Button>
++        )
++      }
++    />
++  );
++}
+diff --git a/apps/web/src/components/sidebar/SidebarProjectFolderHeader.tsx b/apps/web/src/components/sidebar/SidebarProjectFolderHeader.tsx
+index 7ebda48e5b..bdbb2ecdf7 100644
+--- a/apps/web/src/components/sidebar/SidebarProjectFolderHeader.tsx
++++ b/apps/web/src/components/sidebar/SidebarProjectFolderHeader.tsx
+@@ -3,7 +3,7 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environ
+ import type { ContextMenuSource } from "@t3tools/contracts";
+ import { ChevronDownIcon, SquarePenIcon } from "lucide-react";
+ import { msg, T, useGT, useMessages, Var } from "gt-react";
+-import { memo } from "react";
++import { memo, type MouseEvent, type ReactNode } from "react";
+ 
+ import { cn } from "~/lib/utils";
+ import { contextMenuSourceOf } from "../../contextMenuSource";
+@@ -51,9 +51,64 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
+   ) => void;
+ }) {
+   const gt = useGT();
+-  const m = useMessages();
+   const { group, collapsed, hiddenThreads } = props;
+   const rowId = sidebarFolderRowId(group.projectKey);
++  return (
++    <SidebarFolderHeader
++      rowId={rowId}
++      testId="sidebar-project-folder"
++      name={group.displayName}
++      icon={<ProjectFavicon project={group} className="size-4 shrink-0" />}
++      collapsed={collapsed}
++      hiddenThreads={hiddenThreads}
++      onToggle={() => props.onToggle(group)}
++      onContextMenu={(event) => {
++        event.preventDefault();
++        props.onContextMenu(
++          group,
++          { x: event.clientX, y: event.clientY },
++          contextMenuSourceOf(event),
++        );
++      }}
++      action={
++        <Tooltip>
++          <TooltipTrigger
++            render={
++              <Button
++                data-sidebar-action-for={rowId}
++                size="icon-xs"
++                variant="ghost-muted"
++                aria-label={gt("New thread in {project}", { project: group.displayName })}
++                onClick={() => props.onNewThread(group)}
++              />
++            }
++          >
++            <SquarePenIcon aria-hidden />
++          </TooltipTrigger>
++          <TooltipPopup>
++            <T>
++              New thread in <Var>{group.displayName}</Var>
++            </T>
++          </TooltipPopup>
++        </Tooltip>
++      }
++    />
++  );
++});
++
++export const SidebarFolderHeader = memo(function SidebarFolderHeader(props: {
++  rowId: string;
++  testId: string;
++  name: string;
++  icon: ReactNode;
++  collapsed: boolean;
++  hiddenThreads: readonly EnvironmentThreadShell[];
++  onToggle: () => void;
++  onContextMenu?: ((event: MouseEvent) => void) | undefined;
++  action?: ReactNode;
++}) {
++  const m = useMessages();
++  const { rowId, collapsed, hiddenThreads } = props;
+   const localLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
+   const dot = collapsed
+     ? resolveSidebarFolderDot(
+@@ -70,27 +125,20 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
+     : null;
+   return (
+     <li
+-      data-testid="sidebar-project-folder"
++      data-testid={props.testId}
+       className="group/project-folder relative mt-2 list-none first:mt-0"
+     >
+       <button
+         type="button"
+         data-sidebar-row={rowId}
+         aria-expanded={!collapsed}
+-        onClick={() => props.onToggle(group)}
+-        onContextMenu={(event) => {
+-          event.preventDefault();
+-          props.onContextMenu(
+-            group,
+-            { x: event.clientX, y: event.clientY },
+-            contextMenuSourceOf(event),
+-          );
+-        }}
++        onClick={props.onToggle}
++        onContextMenu={props.onContextMenu}
+         className="flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-(--control-radius) px-(--sidebar-row-content-inset) text-left outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+       >
+-        <ProjectFavicon project={group} className="size-4 shrink-0" />
++        {props.icon}
+         <span className="min-w-0 flex-1 truncate text-sm font-medium text-sidebar-foreground/90">
+-          {group.displayName}
++          {props.name}
+         </span>
+         {dot ? (
+           <span className={cn("size-1.5 shrink-0 rounded-full", FOLDER_DOT_CLASS_NAME[dot])}>
+@@ -98,7 +146,13 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
+           </span>
+         ) : null}
+         {collapsed && hiddenThreads.length > 0 ? (
+-          <span className="shrink-0 text-xs tabular-nums text-sidebar-muted-foreground group-hover/project-folder:invisible group-has-[[data-sidebar-action-for]:focus]/project-folder:invisible pointer-coarse:invisible">
++          <span
++            className={cn(
++              "shrink-0 text-xs tabular-nums text-sidebar-muted-foreground",
++              props.action &&
++                "group-hover/project-folder:invisible group-has-[[data-sidebar-action-for]:focus]/project-folder:invisible pointer-coarse:invisible",
++            )}
++          >
+             {hiddenThreads.length}
+           </span>
+         ) : null}
+@@ -110,29 +164,11 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
+           )}
+         />
+       </button>
+-      {/* Sits over the count, which hides on hover or focus, and left of the chevron. */}
+-      <span className="absolute inset-y-0 right-6 flex items-center opacity-0 focus-within:opacity-100 group-hover/project-folder:opacity-100 pointer-coarse:opacity-100">
+-        <Tooltip>
+-          <TooltipTrigger
+-            render={
+-              <Button
+-                data-sidebar-action-for={rowId}
+-                size="icon-xs"
+-                variant="ghost-muted"
+-                aria-label={gt("New thread in {project}", { project: group.displayName })}
+-                onClick={() => props.onNewThread(group)}
+-              />
+-            }
+-          >
+-            <SquarePenIcon aria-hidden />
+-          </TooltipTrigger>
+-          <TooltipPopup>
+-            <T>
+-              New thread in <Var>{group.displayName}</Var>
+-            </T>
+-          </TooltipPopup>
+-        </Tooltip>
+-      </span>
++      {props.action ? (
++        <span className="absolute inset-y-0 right-6 flex items-center opacity-0 focus-within:opacity-100 group-hover/project-folder:opacity-100 pointer-coarse:opacity-100">
++          {props.action}
++        </span>
++      ) : null}
+     </li>
+   );
+ });
+diff --git a/apps/web/src/components/sidebar/SidebarThreadHeader.tsx b/apps/web/src/components/sidebar/SidebarThreadHeader.tsx
+index 185f8fc848..33690ef256 100644
+--- a/apps/web/src/components/sidebar/SidebarThreadHeader.tsx
++++ b/apps/web/src/components/sidebar/SidebarThreadHeader.tsx
+@@ -16,6 +16,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+ export interface SidebarThreadHeaderProps {
+   hasProjects: boolean;
+   projectScope: ReactNode;
++  groupAction?: ReactNode;
+   onNewThread: (event: ReactMouseEvent) => void;
+   newThreadDisabled: boolean;
+   newThreadShortcutLabel: string | null | undefined;
+@@ -34,6 +35,7 @@ export interface SidebarThreadHeaderProps {
+ export function SidebarThreadHeader({
+   hasProjects,
+   projectScope,
++  groupAction,
+   onNewThread,
+   newThreadDisabled,
+   newThreadShortcutLabel,
+@@ -98,6 +100,7 @@ export function SidebarThreadHeader({
+       </div>
+       <div className="flex shrink-0 items-center">
+         {hasProjects ? projectScope : null}
++        {groupAction}
+         <SidebarHeaderIconButton
+           label={gt("New thread")}
+           tooltip={
+diff --git a/apps/web/src/hooks/useNamedThreadGroupActions.tsx b/apps/web/src/hooks/useNamedThreadGroupActions.tsx
+new file mode 100644
+index 0000000000..c5d323b879
+--- /dev/null
++++ b/apps/web/src/hooks/useNamedThreadGroupActions.tsx
+@@ -0,0 +1,174 @@
++import {
++  AuthSettingsWriteScope,
++  type ContextMenuItem,
++  type EnvironmentId,
++  type ScopedThreadRef,
++  type ThreadGroupChange,
++  type ThreadId,
++} from "@t3tools/contracts";
++import { useGT } from "gt-react";
++import { FolderPlusIcon } from "lucide-react";
++import { useState, type MouseEvent } from "react";
++import {
++  namedThreadGroupsIn,
++  ThreadGroupNameDialog,
++  type NamedThreadGroup,
++  type ServerConfigs,
++} from "../components/sidebar/SidebarNamedThreadGroups";
++import { SidebarHeaderIconButton } from "../components/sidebar/SidebarThreadHeader";
++import { contextMenuSourceOf } from "../contextMenuSource";
++import { randomUUID } from "../lib/utils";
++import { readLocalApi } from "../localApi";
++import { appAtomRegistry } from "../rpc/atomRegistry";
++import { environmentServerConfigsAtom, serverEnvironment } from "../state/server";
++import { readEnvironmentScope } from "../state/session";
++import { useAtomCommand } from "../state/use-atom-command";
++
++type Editor = { environmentId: EnvironmentId } & (
++  | { action: "create"; id: string; threadId?: ThreadId }
++  | { action: "rename"; id: string; name: string }
++);
++
++type GroupMenuId =
++  | "thread-group:menu"
++  | "thread-group:new"
++  | `thread-group:assign:${string}`
++  | `thread-group:remove:${string}`;
++
++export function isGroupMenuAction(action: string): action is GroupMenuId {
++  return action.startsWith("thread-group:");
++}
++
++export function useNamedThreadGroupActions(enabled: boolean) {
++  const gt = useGT();
++  const [editor, setEditor] = useState<Editor | null>(null);
++  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, "thread group update");
++
++  const canEdit = (environmentId: EnvironmentId) =>
++    enabled && readEnvironmentScope(environmentId, AuthSettingsWriteScope);
++
++  const updateGroup = async (environmentId: EnvironmentId, change: ThreadGroupChange) =>
++    (await updateSettings({ environmentId, input: { patch: { threadGroupChange: change } } }))
++      ._tag === "Success";
++
++  const menuItem = (ref: ScopedThreadRef): ContextMenuItem<GroupMenuId> | null => {
++    const groups = namedThreadGroupsIn(
++      appAtomRegistry.get(environmentServerConfigsAtom).get(ref.environmentId),
++    );
++    if (!canEdit(ref.environmentId) || groups === null) return null;
++    const children: ContextMenuItem<GroupMenuId>[] = [
++      { id: "thread-group:new", label: gt("New group…") },
++    ];
++    let remove: ContextMenuItem<GroupMenuId> | undefined;
++    for (const [id, group] of Object.entries(groups)) {
++      if (group.memberThreadIds.includes(ref.threadId)) {
++        remove = {
++          id: `thread-group:remove:${id}`,
++          label: gt("Remove from {group}", { group: group.name }),
++          separatorBefore: true,
++        };
++      } else {
++        children.push({ id: `thread-group:assign:${id}`, label: group.name });
++      }
++    }
++    if (remove !== undefined) children.push(remove);
++    return { id: "thread-group:menu", label: gt("Thread group"), icon: "folder", children };
++  };
++
++  const handleThreadMenu = async (action: GroupMenuId, ref: ScopedThreadRef) => {
++    if (!canEdit(ref.environmentId)) return;
++    if (action === "thread-group:new") {
++      setEditor({
++        action: "create",
++        id: randomUUID(),
++        environmentId: ref.environmentId,
++        threadId: ref.threadId,
++      });
++    } else if (action !== "thread-group:menu") {
++      const [, operation, id] = action.split(":");
++      if (id !== undefined && (operation === "assign" || operation === "remove")) {
++        await updateGroup(ref.environmentId, { action: operation, id, threadId: ref.threadId });
++      }
++    }
++  };
++
++  const handleGroupMenu = async (group: NamedThreadGroup, event: MouseEvent) => {
++    event.preventDefault();
++    if (!canEdit(group.environmentId)) return;
++    const api = readLocalApi();
++    if (!api) return;
++    const menu = [
++      { id: "rename", label: gt("Rename group…") },
++      { id: "delete", label: gt("Remove group"), destructive: true },
++    ] as const;
++    const rect = event.currentTarget.getBoundingClientRect();
++    const position =
++      event.type === "contextmenu" && contextMenuSourceOf(event) === "mouse"
++        ? { x: event.clientX, y: event.clientY }
++        : { x: rect.left, y: rect.bottom };
++    const choice = await api.contextMenu.show(menu, position, contextMenuSourceOf(event));
++    if (choice === "rename") setEditor({ ...group, action: "rename" });
++    if (choice === "delete")
++      await updateGroup(group.environmentId, { action: "delete", id: group.id });
++  };
++
++  const createButton = (
++    configs: ServerConfigs,
++    labels: ReadonlyMap<EnvironmentId, string | null>,
++  ) => {
++    const environments = [...configs.keys()].filter(
++      (environmentId) =>
++        canEdit(environmentId) && namedThreadGroupsIn(configs.get(environmentId)) !== null,
++    );
++    if (environments.length === 0) return null;
++    return (
++      <SidebarHeaderIconButton
++        label={gt("New group")}
++        onClick={async (event) => {
++          let environmentId = environments[0];
++          if (environments.length > 1) {
++            const rect = event.currentTarget.getBoundingClientRect();
++            environmentId =
++              (await readLocalApi()?.contextMenu.show(
++                environments.map((id) => ({ id, label: labels.get(id) ?? gt("Local") })),
++                { x: rect.left, y: rect.bottom },
++                contextMenuSourceOf(event),
++              )) ?? undefined;
++          }
++          if (environmentId !== undefined)
++            setEditor({ action: "create", id: randomUUID(), environmentId });
++        }}
++      >
++        <FolderPlusIcon />
++      </SidebarHeaderIconButton>
++    );
++  };
++
++  return {
++    menuItem,
++    handleThreadMenu,
++    handleGroupMenu,
++    canEdit,
++    createButton,
++    dialog:
++      enabled && editor !== null ? (
++        <ThreadGroupNameDialog
++          key={editor.id}
++          initialName={editor.action === "rename" ? editor.name : null}
++          onClose={() => setEditor(null)}
++          onSave={async (name) => {
++            const change: ThreadGroupChange =
++              editor.action === "rename"
++                ? { action: "rename", id: editor.id, name }
++                : {
++                    action: "create",
++                    id: editor.id,
++                    name,
++                    ...(editor.threadId === undefined ? {} : { threadId: editor.threadId }),
++                  };
++            if (await updateGroup(editor.environmentId, change)) setEditor(null);
++          }}
++        />
++      ) : null,
++  };
++}
+diff --git a/packages/contracts/src/server.ts b/packages/contracts/src/server.ts
+index 1e70426001..6876fe71b5 100644
+--- a/packages/contracts/src/server.ts
++++ b/packages/contracts/src/server.ts
+@@ -731,6 +731,7 @@ export const ServerConfig = Schema.Struct({
+    * `getThreadFamily` and `getWorktreeThreadIds` serve the rows it leaves out.
+    */
+   shellThreadFamilies: Schema.optionalKey(Schema.Boolean),
++  namedThreadGroups: Schema.optionalKey(Schema.Boolean),
+   threadLinkMetadata: Schema.optionalKey(Schema.Boolean),
+   /**
+    * The shell can leave older settled threads out of snapshots (`omitOlderSettled`), and
+diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
+index bf060824d2..1ad1f01897 100644
+--- a/packages/contracts/src/settings.ts
++++ b/packages/contracts/src/settings.ts
+@@ -1396,7 +1396,33 @@ export const CloudSpeechCredentials = Schema.Struct({
+   openrouter: CloudSpeechCredential,
+ });
+ 
++const ThreadGroupId = TrimmedNonEmptyString.check(
++  Schema.isPattern(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/),
++);
++const ThreadGroupName = TrimmedNonEmptyString.check(Schema.isMaxLength(120));
++export const ThreadGroups = Schema.Record(
++  ThreadGroupId,
++  Schema.Struct({ name: ThreadGroupName, memberThreadIds: Schema.Array(ThreadId) }),
++);
++export type ThreadGroups = typeof ThreadGroups.Type;
++
++const ThreadGroupChange = Schema.Union([
++  Schema.Struct({
++    action: Schema.Literal("create"),
++    id: ThreadGroupId,
++    name: ThreadGroupName,
++    threadId: Schema.optionalKey(ThreadId),
++  }),
++  Schema.Struct({ action: Schema.Literal("rename"), id: ThreadGroupId, name: ThreadGroupName }),
++  Schema.Struct({ action: Schema.Literal("delete"), id: ThreadGroupId }),
++  Schema.Struct({ action: Schema.Literal("assign"), id: ThreadGroupId, threadId: ThreadId }),
++  Schema.Struct({ action: Schema.Literal("remove"), id: ThreadGroupId, threadId: ThreadId }),
++]);
++export type ThreadGroupChange = typeof ThreadGroupChange.Type;
++
+ export const ServerSettings = Schema.Struct({
++  // Null means the legacy initiative store has not been migrated. Empty is authoritative.
++  threadGroups: Schema.NullOr(ThreadGroups).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
+   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+   providerModelPreferences: Schema.NullOr(ProviderModelPreferences).pipe(
+@@ -1841,8 +1867,8 @@ const ModelSelectionPatch = Schema.Struct({
+   options: Schema.optionalKey(ProviderOptionSelections),
+ });
+ 
+-
+ export const ServerSettingsPatch = Schema.Struct({
++  threadGroupChange: Schema.optionalKey(ThreadGroupChange),
+   setModelFavorites: Schema.optionalKey(
+     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
+   ),
+diff --git a/packages/shared/src/serverSettings.ts b/packages/shared/src/serverSettings.ts
+index 023c6eb743..8b979ed619 100644
+--- a/packages/shared/src/serverSettings.ts
++++ b/packages/shared/src/serverSettings.ts
+@@ -22,6 +22,8 @@ import {
+   type ServerProvider,
+   ServerSettings,
+   type ServerSettingsPatch,
++  type ThreadGroupChange,
++  type ThreadGroups,
+   withIdleCompaction,
+ } from "@t3tools/contracts";
+ import * as Option from "effect/Option";
+@@ -383,6 +385,57 @@ function patchedIdleCompaction(
+   return globalIdleCompaction(current) === "off" ? "off" : "onReturn";
+ }
+ 
++function applyThreadGroupChange(groups: ThreadGroups, change: ThreadGroupChange): ThreadGroups {
++  const { id } = change;
++  const group = Object.hasOwn(groups, id) ? groups[id] : undefined;
++  switch (change.action) {
++    case "delete": {
++      const next = { ...groups };
++      delete next[id];
++      return next;
++    }
++    case "rename":
++      return group === undefined ? groups : { ...groups, [id]: { ...group, name: change.name } };
++    case "remove":
++      return group === undefined
++        ? groups
++        : {
++            ...groups,
++            [id]: {
++              ...group,
++              memberThreadIds: group.memberThreadIds.filter(
++                (threadId) => threadId !== change.threadId,
++              ),
++            },
++          };
++    case "create": {
++      if (group !== undefined) return groups;
++      const next = { ...groups, [id]: { name: change.name, memberThreadIds: [] } };
++      return change.threadId === undefined
++        ? next
++        : applyThreadGroupChange(next, { action: "assign", id, threadId: change.threadId });
++    }
++    case "assign": {
++      if (group === undefined || group.memberThreadIds.includes(change.threadId)) return groups;
++      const next = { ...groups };
++      for (const [otherId, other] of Object.entries(groups)) {
++        if (other.memberThreadIds.includes(change.threadId)) {
++          next[otherId] = {
++            ...other,
++            memberThreadIds: other.memberThreadIds.filter(
++              (threadId) => threadId !== change.threadId,
++            ),
++          };
++        }
++      }
++      return {
++        ...next,
++        [id]: { ...group, memberThreadIds: [...group.memberThreadIds, change.threadId] },
++      };
++    }
++  }
++}
++
+ export function applyServerSettingsPatch(
+   current: ServerSettings,
+   rawPatch: ServerSettingsPatch,
+@@ -390,6 +443,7 @@ export function applyServerSettingsPatch(
+   const patch = translateLegacyProjectOverridePatch(current, rawPatch);
+   const selectionPatch = patch.textGenerationModelSelection;
+   const {
++    threadGroupChange,
+     migrateModelPreferences,
+     setModelFavorites,
+     setModelsHidden,
+@@ -504,6 +558,10 @@ export function applyServerSettingsPatch(
+   const next = deepMerge(current, patchForMerge);
+   const nextWithReplacementsBase = {
+     ...next,
++    threadGroups:
++      threadGroupChange === undefined
++        ? current.threadGroups
++        : applyThreadGroupChange(current.threadGroups ?? {}, threadGroupChange),
+     favorites,
+     providerModelPreferences: nextModelPreferences,
+     ...(worktreeCleanupPatch === undefined
+diff --git a/scripts/scenarios/named-thread-groups.e2e.ts b/scripts/scenarios/named-thread-groups.e2e.ts
+new file mode 100644
+index 0000000000..441e702e23
+--- /dev/null
++++ b/scripts/scenarios/named-thread-groups.e2e.ts
+@@ -0,0 +1,99 @@
++import { expect } from "e2e";
++
++import { test, WEB } from "./t3.ts";
++
++test(
++  "Named groups organize threads across projects in the boring sidebar",
++  WEB,
++  async ({ t3, app, browser, screen }) => {
++    const server = await t3.project("jobs-server");
++    const client = await t3.project("jobs-client");
++    await t3.thread({ project: server, title: "Routing", messages: ["first"] });
++    await t3.thread({ project: client, title: "Backfill", messages: ["first"] });
++    await t3.thread({ project: client, title: "Other work", messages: ["first"] });
++    await t3.open();
++
++    await expect(screen.getByRole("button", "New group", { exact: true })).toBeHidden();
++    await app.open("/settings/labs");
++    await screen.getByRole("switch", "Boring sidebar (group by project)", { exact: true }).tap();
++    await app.open("/");
++
++    const openThreadMenu = async (title: string, group = true) => {
++      await expect(screen.getByRole("button", `${title},`, { exact: false })).toBeVisible();
++      await browser.evaluate(
++        `(title) => {
++      const row = [...document.querySelectorAll('[role="button"][data-sidebar-row]')].find(
++        (element) => element.getAttribute('aria-label')?.startsWith(title + ",")
++      );
++      if (!row) throw new Error("Cannot find sidebar row " + title);
++      const rect = row.getBoundingClientRect();
++      row.dispatchEvent(new MouseEvent("contextmenu", {
++        bubbles: true, cancelable: true, clientX: rect.x + 10, clientY: rect.y + 10
++      }));
++    }`,
++        title,
++      );
++      if (group)
++        await screen.getByRole("menuitem", "Thread group", { exact: true }).press("ArrowRight");
++    };
++    const inGroup = (title: string) =>
++      browser.evaluate<boolean, string>(
++        `(title) => {
++      const row = [...document.querySelectorAll('[role="button"][data-sidebar-row]')].find(
++        (element) => element.getAttribute('aria-label')?.startsWith(title + ",")
++      );
++      return row?.getAttribute("data-sidebar-parent")?.includes("named-thread-group") ?? false;
++    }`,
++        title,
++      );
++
++    await openThreadMenu("Routing");
++    await screen.getByRole("menuitem", "New group…", { exact: true }).tap();
++    await screen.getByLabel("Group name").fill("Jobs rollout");
++    await screen.getByRole("button", "Create", { exact: true }).tap();
++    await expect.poll(() => inGroup("Routing")).toBe(true);
++
++    await openThreadMenu("Backfill");
++    await screen.getByRole("menuitem", "Jobs rollout", { exact: true }).tap();
++    await expect.poll(() => inGroup("Backfill")).toBe(true);
++    await expect.poll(() => inGroup("Other work")).toBe(false);
++    await expect(screen.getByTestId("sidebar-project-folder")).toBeVisible();
++    await app.open("/");
++    await expect.poll(() => inGroup("Backfill")).toBe(true);
++    await app.screenshot("named-group-across-projects");
++
++    const folder = screen.getByRole("button", { name: /^Jobs rollout/ });
++    await folder.tap();
++    await expect(screen.getByRole("button", { name: /Routing,/ })).toBeHidden();
++    await folder.tap();
++    await expect(screen.getByRole("button", { name: /Routing,/ })).toBeVisible();
++
++    await openThreadMenu("Routing", false);
++    await screen.getByRole("menuitem", "Settle thread", { exact: true }).tap();
++    await expect(screen.getByRole("button", { name: /Routing,/ })).toBeHidden();
++    await screen.getByRole("button", { name: /^Settled/ }).tap();
++    await openThreadMenu("Routing", false);
++    await screen.getByRole("menuitem", "Un-settle thread", { exact: true }).tap();
++    await expect.poll(() => inGroup("Routing")).toBe(true);
++
++    await screen.getByRole("button", "Manage Jobs rollout", { exact: true }).tap();
++    await screen.getByRole("menuitem", "Rename group…", { exact: true }).tap();
++    await screen.getByLabel("Group name").fill("Launch");
++    await screen.getByRole("button", "Save", { exact: true }).tap();
++    await app.open("/");
++    await expect(screen.getByRole("button", { name: /^Launch/ })).toBeVisible();
++
++    await openThreadMenu("Backfill");
++    await screen.getByRole("menuitem", "Remove from Launch", { exact: true }).tap();
++    await expect.poll(() => inGroup("Backfill")).toBe(false);
++    await screen.getByRole("button", "Manage Launch", { exact: true }).tap();
++    await screen.getByRole("menuitem", "Remove group", { exact: true }).tap();
++    await expect(screen.getByTestId("sidebar-named-thread-group")).toBeHidden();
++    await expect(screen.getByRole("button", { name: /Routing,/ })).toBeVisible();
++
++    await screen.getByRole("button", "New group", { exact: true }).tap();
++    await screen.getByLabel("Group name").fill("Ideas");
++    await screen.getByRole("button", "Create", { exact: true }).tap();
++    await expect(screen.getByRole("button", { name: /^Ideas/ })).toBeVisible();
++  },
++);
