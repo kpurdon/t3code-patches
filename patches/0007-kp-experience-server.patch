@@ -367,7 +367,7 @@ index 80e688df..b8f33ddc 100644
        settings = applyServerSettingsPatch(settings, {
          initiativeChange: { action: "assign", id: "routing", threadId },
 diff --git a/scripts/scenarios/start-app.ts b/scripts/scenarios/start-app.ts
-index d635f1ba..af5603e4 100644
+index 59d0715f..d18b9fab 100644
 --- a/scripts/scenarios/start-app.ts
 +++ b/scripts/scenarios/start-app.ts
 @@ -69,6 +69,7 @@ export const prepareHome = Effect.fn("startApp.prepareHome")(function* (home: st

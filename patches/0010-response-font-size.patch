@@ -159,10 +159,10 @@ index 50a664fe..90163c31 100644
    root.style.setProperty("--font-size-code", `${code}px`);
    root.style.setProperty("--diffs-font-size", `${code}px`);
 diff --git a/apps/web/src/components/chat/TimelineAssistantRows.tsx b/apps/web/src/components/chat/TimelineAssistantRows.tsx
-index 72fcf790..84f72883 100644
+index f22b1338..f5c9732a 100644
 --- a/apps/web/src/components/chat/TimelineAssistantRows.tsx
 +++ b/apps/web/src/components/chat/TimelineAssistantRows.tsx
-@@ -69,6 +69,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
+@@ -50,6 +50,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
              listRef={ctx.listRef}
            >
              <ChatMarkdown
@@ -545,10 +545,10 @@ index 279dbd39..99d357a4 100644
      hasCloudPublicConfig: cloudPublicConfig,
      hasEnvironment,
 diff --git a/apps/web/src/index.css b/apps/web/src/index.css
-index 15380512..9abb39a4 100644
+index 272c0269..feab4b53 100644
 --- a/apps/web/src/index.css
 +++ b/apps/web/src/index.css
-@@ -2683,3 +2683,57 @@ code {
+@@ -2676,3 +2676,57 @@ code {
  .messages-timeline-scroll:focus-visible {
    outline: none;
  }

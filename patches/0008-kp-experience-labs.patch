@@ -976,7 +976,7 @@ index 00000000..98015a45
 +  },
 +);
 diff --git a/scripts/scenarios/start-app.ts b/scripts/scenarios/start-app.ts
-index af5603e4..42c2d756 100644
+index d18b9fab..0c5789e4 100644
 --- a/scripts/scenarios/start-app.ts
 +++ b/scripts/scenarios/start-app.ts
 @@ -69,7 +69,7 @@ export const prepareHome = Effect.fn("startApp.prepareHome")(function* (home: st

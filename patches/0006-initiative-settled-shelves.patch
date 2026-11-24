@@ -512,10 +512,10 @@ index 5b48a613..1d9cf04a 100644
      expect(savedServerSettings().initiatives.other?.memberThreadIds).not.toContain(flat.id),
    );
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index efa9e54e..e57fbbb1 100644
+index c1563af2..5972c7ce 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
-@@ -506,11 +506,18 @@ function useSidebarThreads(input: {
+@@ -507,11 +507,18 @@ function useSidebarThreads(input: {
      [] as readonly string[],
      INITIATIVE_COLLAPSED_SCHEMA,
    );
@@ -534,7 +534,7 @@ index efa9e54e..e57fbbb1 100644
    );
    const partition = partitionSidebarThreads({
      threads: threads.filter((thread) => !initiatives.keys.has(threadShellKey(thread))),
-@@ -580,7 +587,6 @@ function useSidebarThreads(input: {
+@@ -581,7 +588,6 @@ function useSidebarThreads(input: {
            };
          });
    const orderedThreads = [
@@ -542,7 +542,7 @@ index efa9e54e..e57fbbb1 100644
      ...pinnedThreads,
      ...(projectFolders === null
        ? activeThreads
-@@ -588,6 +594,7 @@ function useSidebarThreads(input: {
+@@ -589,6 +595,7 @@ function useSidebarThreads(input: {
      ...visibleWorkingThreads,
      ...visibleSnoozedThreads,
      ...renderedSettledThreads,
@@ -550,7 +550,7 @@ index efa9e54e..e57fbbb1 100644
    ];
    const sectionByThreadKey = new Map<string, SidebarSection>();
    for (const [list, section] of [
-@@ -646,7 +653,12 @@ function useSidebarThreads(input: {
+@@ -647,7 +654,12 @@ function useSidebarThreads(input: {
      visibleWorkingThreads,
      orderedThreadKeys: orderedThreads.map(threadShellKey),
      threadByKey: new Map(orderedThreads.map((thread) => [threadShellKey(thread), thread] as const)),
@@ -564,7 +564,7 @@ index efa9e54e..e57fbbb1 100644
      snoozedThreadKeys: new Set(snoozedThreads.map(threadShellKey)),
      sectionByThreadKey,
      pinnedKeys: pinnedThreads.map(threadShellKey),
-@@ -3865,7 +3877,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3874,7 +3886,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                          ) : null,
                        );
                        if (showOtherSessions) {
@@ -573,7 +573,7 @@ index efa9e54e..e57fbbb1 100644
                            <li
                              key="other-sessions"
                              data-testid="sidebar-ungrouped-threads"
-@@ -3877,7 +3889,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3886,7 +3898,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            </li>,
                          );
                        } else if (!hasVisibleInitiatives || from !== null) {

@@ -1050,7 +1050,7 @@ index ed929629..9b53ec5f 100644
    await expect.element(row(a.title)).toBeVisible();
    await expect.element(row(foreign.title)).not.toBeInTheDocument();
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index e57fbbb1..6f5a55ff 100644
+index 5972c7ce..b9b70e75 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
 @@ -4,7 +4,7 @@ import { m } from "../i18n/messages";
@@ -1062,7 +1062,7 @@ index e57fbbb1..6f5a55ff 100644
  import { attachSidebarTree } from "../lib/sidebarTree";
  import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
  import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
-@@ -511,6 +511,11 @@ function useSidebarThreads(input: {
+@@ -512,6 +512,11 @@ function useSidebarThreads(input: {
      [] as readonly string[],
      INITIATIVE_COLLAPSED_SCHEMA,
    );
@@ -1074,7 +1074,7 @@ index e57fbbb1..6f5a55ff 100644
    const initiatives = initiativeLayout(
      threads,
      serverConfigs,
-@@ -518,6 +523,7 @@ function useSidebarThreads(input: {
+@@ -519,6 +524,7 @@ function useSidebarThreads(input: {
      collapsedInitiatives,
      expandedInitiativeSettled,
      routeRowThreadKey,
@@ -1082,7 +1082,7 @@ index e57fbbb1..6f5a55ff 100644
    );
    const partition = partitionSidebarThreads({
      threads: threads.filter((thread) => !initiatives.keys.has(threadShellKey(thread))),
-@@ -618,6 +624,13 @@ function useSidebarThreads(input: {
+@@ -619,6 +625,13 @@ function useSidebarThreads(input: {
    return {
      ...partition,
      initiatives,
@@ -1096,7 +1096,7 @@ index e57fbbb1..6f5a55ff 100644
      threads,
      workingShelfEnabled,
      searchableThreads: [
-@@ -1366,6 +1379,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -1375,6 +1388,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
    const {
      workingShelfEnabled,
      initiatives,
@@ -1104,7 +1104,7 @@ index e57fbbb1..6f5a55ff 100644
      pinnedThreads,
      draggableThreadKeys,
      activeReorderableThreadKeys,
-@@ -3689,6 +3703,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3698,6 +3712,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            key="initiatives"
                            threads={threads}
                            groups={initiatives.groups}
@@ -1112,7 +1112,7 @@ index e57fbbb1..6f5a55ff 100644
                            renderThread={(thread, parent, initiative) =>
                              renderThreadRow(
                                thread,
-@@ -3868,10 +3883,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3877,10 +3892,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                {/* Plus means "add", so revealing more uses a chevron. */}
                                <ChevronDownIcon aria-hidden className="size-4 shrink-0" />
                                {olderSettledShelf.loading
