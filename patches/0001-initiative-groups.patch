@@ -307,7 +307,7 @@ index 8b585042..5175abdd 100644
                    { environmentId: scope.environmentId, threadId },
                    projection.thread.title,
 diff --git a/apps/server/src/mcp/toolkits/core.test.ts b/apps/server/src/mcp/toolkits/core.test.ts
-index 33c356af..fc562a74 100644
+index c1d35ace..339acb48 100644
 --- a/apps/server/src/mcp/toolkits/core.test.ts
 +++ b/apps/server/src/mcp/toolkits/core.test.ts
 @@ -87,6 +87,7 @@ const decodeThreadSearchResult = Schema.decodeUnknownEffect(
@@ -318,7 +318,7 @@ index 33c356af..fc562a74 100644
    Layer.provide(Layer.mock(ThreadSearch.ThreadSearch)({})),
    Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
    Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
-@@ -894,6 +895,7 @@ it.effect("search names the calling thread, so an agent can tell its own match a
+@@ -935,6 +936,7 @@ it.effect("search names the calling thread, so an agent can tell its own match a
    }).pipe(
      Effect.provide(
        McpHttpServer.layerThreadToolkit.pipe(
@@ -326,7 +326,7 @@ index 33c356af..fc562a74 100644
          Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
          Layer.provide(NodeCrypto.layer),
          Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
-@@ -1135,6 +1137,7 @@ it.effect.each([
+@@ -1176,6 +1178,7 @@ it.effect.each([
    }).pipe(
      Effect.provide(
        McpHttpServer.layerThreadToolkit.pipe(
@@ -334,7 +334,7 @@ index 33c356af..fc562a74 100644
          Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
          Layer.provide(NodeCrypto.layer),
          Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
-@@ -1174,6 +1177,7 @@ it.effect("run_scheduled_task_now reports why a started run failed to dispatch",
+@@ -1215,6 +1218,7 @@ it.effect("run_scheduled_task_now reports why a started run failed to dispatch",
    }).pipe(
      Effect.provide(
        McpHttpServer.layerThreadToolkit.pipe(
@@ -1677,7 +1677,7 @@ index 00000000..949e410b
 +  await expect.element(row(foreign.title)).not.toBeInTheDocument();
 +});
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index 9c1918be..f4cd41e7 100644
+index 59fcb56b..7dac095a 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
 @@ -1,6 +1,8 @@
@@ -1689,7 +1689,7 @@ index 9c1918be..f4cd41e7 100644
  import { attachSidebarTree } from "../lib/sidebarTree";
  import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
  import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
-@@ -386,6 +388,8 @@ function threadShellKey(thread: Pick<SidebarThreadSummary, "environmentId" | "id
+@@ -387,6 +389,8 @@ function threadShellKey(thread: Pick<SidebarThreadSummary, "environmentId" | "id
  }
  
  const NO_DRAGGED_ORDER: readonly string[] = [];
@@ -1698,7 +1698,7 @@ index 9c1918be..f4cd41e7 100644
  const NO_DRAGGED_ORDERS: {
    readonly settledOrder: readonly string[];
    readonly activeOrder: readonly string[] | undefined;
-@@ -494,8 +498,19 @@ function useSidebarThreads(input: {
+@@ -495,8 +499,19 @@ function useSidebarThreads(input: {
    const settledVisibleCount =
      settledTail.scopeKey === projectScopeKey ? settledTail.count : SETTLED_TAIL_INITIAL_COUNT;
  
@@ -1719,7 +1719,7 @@ index 9c1918be..f4cd41e7 100644
      scopedProjectKeys,
      delegatedUnderParent,
      serverConfigs,
-@@ -517,7 +532,8 @@ function useSidebarThreads(input: {
+@@ -518,7 +533,8 @@ function useSidebarThreads(input: {
    const listedSettledThreads = settledThreads.filter(olderSettledShelf.isListed);
    useOlderSettledShelfGrowth(olderSettledShelf, listedSettledThreads);
    const settledCount =
@@ -1729,7 +1729,7 @@ index 9c1918be..f4cd41e7 100644
    const visibleSettledThreads = (() => {
      const visible = listedSettledThreads.slice(0, settledVisibleCount);
      if (
-@@ -561,6 +577,7 @@ function useSidebarThreads(input: {
+@@ -562,6 +578,7 @@ function useSidebarThreads(input: {
            };
          });
    const orderedThreads = [
@@ -1737,7 +1737,7 @@ index 9c1918be..f4cd41e7 100644
      ...pinnedThreads,
      ...(projectFolders === null
        ? activeThreads
-@@ -579,11 +596,22 @@ function useSidebarThreads(input: {
+@@ -580,11 +597,22 @@ function useSidebarThreads(input: {
    ] as const) {
      for (const thread of list) sectionByThreadKey.set(threadShellKey(thread), section);
    }
@@ -1760,7 +1760,7 @@ index 9c1918be..f4cd41e7 100644
        ...pinnedThreads,
        ...activeThreads,
        ...workingThreads,
-@@ -1318,6 +1346,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -1327,6 +1355,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
  
    const {
      workingShelfEnabled,
@@ -1768,7 +1768,7 @@ index 9c1918be..f4cd41e7 100644
      pinnedThreads,
      draggableThreadKeys,
      activeReorderableThreadKeys,
-@@ -3504,6 +3533,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3513,6 +3542,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              sortableId={threadKey}
                              contextDrag={isContextDrag}
                              sortableDisabled={
@@ -1776,7 +1776,7 @@ index 9c1918be..f4cd41e7 100644
                                renamingThreadKey === threadKey ||
                                !draggableThreadKeys.has(threadKey) ||
                                optimisticDrop !== null
-@@ -3614,6 +3644,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3623,6 +3653,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            onDraftContextMenu={handleDraftContextMenu}
                          />,
                        ];

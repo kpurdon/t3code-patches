@@ -248,18 +248,18 @@ index aa9af60d..2cd1fec6 100644
 +  expect(dispatchedCommands()).toEqual(commandsBeforeMenu);
  });
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index f4cd41e7..c5e12756 100644
+index 7dac095a..3da82fd3 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
-@@ -139,6 +139,7 @@ import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
+@@ -140,6 +140,7 @@ import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
  import { registerSettleAndAdvance } from "../settleAndAdvance";
- import { startNewThreadFromContext } from "../lib/chatThreadActions";
+ import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
  import { useClientSettings } from "../hooks/useSettings";
 +import { useInitiativeThreadActions } from "../hooks/useInitiativeThreadActions";
  import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
  import { useLocalStorage } from "../hooks/useLocalStorage";
  import { useNowMinute } from "../hooks/useNowMinute";
-@@ -966,6 +967,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -967,6 +968,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
    const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
    const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
    const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -267,7 +267,7 @@ index f4cd41e7..c5e12756 100644
    const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
    const {
      settleThread,
-@@ -2723,6 +2725,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -2732,6 +2734,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
          const clicked = await settlePromise(() =>
            api.contextMenu.show(
              buildThreadActionMenuItems({
@@ -275,7 +275,7 @@ index f4cd41e7..c5e12756 100644
                canOperate: readEnvironmentScope(
                  threadRef.environmentId,
                  AuthOrchestrationOperateScope,
-@@ -2763,6 +2766,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -2772,6 +2775,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
            ),
          );
          if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -283,7 +283,7 @@ index f4cd41e7..c5e12756 100644
          if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
          if (clicked.value?.startsWith("snooze:")) {
            const preset =
-@@ -3427,6 +3431,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3436,6 +3440,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
            {!isSearchingThreads &&
            !hasProjectFolders &&
            visibleDraftSessionCount === 0 &&
@@ -291,7 +291,7 @@ index f4cd41e7..c5e12756 100644
            pinnedThreads.length +
              activeThreads.length +
              workingThreads.length +
-@@ -3514,6 +3519,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3523,6 +3528,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                          section: SidebarSection,
                          // The tree row of the project folder this row sits in.
                          folderRow?: string,
@@ -299,7 +299,7 @@ index f4cd41e7..c5e12756 100644
                        ) => {
                          const threadKey = scopedThreadKey(
                            scopeThreadRef(thread.environmentId, thread.id),
-@@ -3540,6 +3546,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3549,6 +3555,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              }
                              thread={thread}
                              variant={rowVariant}
@@ -308,7 +308,7 @@ index f4cd41e7..c5e12756 100644
                              navigationParent={
                                folderRow ??
                                (section === "working" ||
-@@ -3649,11 +3657,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3658,11 +3666,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            key="initiatives"
                            threads={threads}
                            groups={initiatives.groups}
@@ -666,10 +666,10 @@ index 3c8255b0..754478ff 100644
    useClientSettings: (select: (settings: unknown) => unknown) =>
      select({
 diff --git a/apps/web/src/hooks/useThreadActionMenu.ts b/apps/web/src/hooks/useThreadActionMenu.ts
-index 137c91a2..2cf437f6 100644
+index 78608560..09e01d3f 100644
 --- a/apps/web/src/hooks/useThreadActionMenu.ts
 +++ b/apps/web/src/hooks/useThreadActionMenu.ts
-@@ -50,6 +50,7 @@ import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
+@@ -51,6 +51,7 @@ import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
  import { useCopyToClipboard } from "./useCopyToClipboard";
  import { useNewThreadHandler } from "./useHandleNewThread";
  import { useClientSettings } from "./useSettings";
@@ -677,7 +677,7 @@ index 137c91a2..2cf437f6 100644
  import { canTurnThreadIntoProject, useThreadActions } from "./useThreadActions";
  
  function failureToast(title: string, error: unknown) {
-@@ -70,6 +71,7 @@ export function useThreadActionMenu(input: {
+@@ -71,6 +72,7 @@ export function useThreadActionMenu(input: {
    readonly canShareWithGuest: boolean;
  }) {
    const { threadRef, projectCwd, onStartRename, onFind, canShareWithGuest } = input;
@@ -685,7 +685,7 @@ index 137c91a2..2cf437f6 100644
    const router = useRouter();
    const projects = useProjects();
    const primaryEnvironmentId = usePrimaryEnvironmentId();
-@@ -139,6 +141,7 @@ export function useThreadActionMenu(input: {
+@@ -140,6 +142,7 @@ export function useThreadActionMenu(input: {
        const isRegeneratingTitle = thread.titleRegeneration != null;
        const snoozePresets = resolveSnoozePresets(now, timestampFormat, threadRef.environmentId);
        const items = buildThreadActionMenuItems({
@@ -693,8 +693,8 @@ index 137c91a2..2cf437f6 100644
          canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
          canFind: onFind !== undefined,
          branch: thread.branch ?? null,
-@@ -159,6 +162,7 @@ export function useThreadActionMenu(input: {
-       const clicked = await settlePromise(() => api.contextMenu.show(items, position));
+@@ -160,6 +163,7 @@ export function useThreadActionMenu(input: {
+       const clicked = await settlePromise(() => api.contextMenu.show(items, position, source));
        if (clicked._tag === "Failure" || clicked.value === null) return;
        const action: ThreadActionMenuId = clicked.value;
 +      if (await initiativeActions.handle(action, threadRef)) return;
