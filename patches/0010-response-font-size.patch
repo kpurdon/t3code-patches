@@ -12,10 +12,10 @@ index d66ca346..0622fced 100644
    fontSizeTerminal: 12,
    fontSmoothing: true,
 diff --git a/apps/web/src/appInit.tsx b/apps/web/src/appInit.tsx
-index cce59f08..9048567a 100644
+index 76e7bc9e..6d745afb 100644
 --- a/apps/web/src/appInit.tsx
 +++ b/apps/web/src/appInit.tsx
-@@ -108,6 +108,8 @@ function startClientAppearance(): void {
+@@ -111,6 +111,8 @@ function startClientAppearance(): void {
        previous.fontSizeInterface !== settings.fontSizeInterface ||
        previous.fontSizePrompt !== settings.fontSizePrompt ||
        previous.fontSizeCode !== settings.fontSizeCode ||
@@ -24,7 +24,7 @@ index cce59f08..9048567a 100644
        previous.fontSmoothing !== settings.fontSmoothing ||
        previousSeparateFonts !== separateFonts
      ) {
-@@ -118,6 +120,8 @@ function startClientAppearance(): void {
+@@ -121,6 +123,8 @@ function startClientAppearance(): void {
          sizeInterface: settings.fontSizeInterface,
          sizePrompt: settings.fontSizePrompt,
          sizeCode: settings.fontSizeCode,
@@ -159,7 +159,7 @@ index 50a664fe..90163c31 100644
    root.style.setProperty("--font-size-code", `${code}px`);
    root.style.setProperty("--diffs-font-size", `${code}px`);
 diff --git a/apps/web/src/components/chat/TimelineAssistantRows.tsx b/apps/web/src/components/chat/TimelineAssistantRows.tsx
-index f22b1338..f5c9732a 100644
+index 9692bbed..c4b73bc3 100644
 --- a/apps/web/src/components/chat/TimelineAssistantRows.tsx
 +++ b/apps/web/src/components/chat/TimelineAssistantRows.tsx
 @@ -50,6 +50,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
@@ -312,10 +312,10 @@ index 0dd8f54f..8ed66e30 100644
      settings.fontSizeInterface !== DEFAULT_UNIFIED_SETTINGS.fontSizeInterface
        ? [resolve(msg("Interface font"))]
 diff --git a/apps/web/src/components/settings/SettingsPanels.tsx b/apps/web/src/components/settings/SettingsPanels.tsx
-index 97b278a4..bb2835d9 100644
+index 10d4e2c6..792a0622 100644
 --- a/apps/web/src/components/settings/SettingsPanels.tsx
 +++ b/apps/web/src/components/settings/SettingsPanels.tsx
-@@ -765,6 +765,8 @@ export function useSettingsRestore(onRestored?: () => void) {
+@@ -769,6 +769,8 @@ export function useSettingsRestore(onRestored?: () => void) {
        fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
        fontFamilyTerminal: DEFAULT_UNIFIED_SETTINGS.fontFamilyTerminal,
        fontSizeInterface: DEFAULT_UNIFIED_SETTINGS.fontSizeInterface,
@@ -463,7 +463,7 @@ index 3249b676..6e5efaa1 100644
  
    it("finds linked environments on a remote host without local maintenance access", () => {
 diff --git a/apps/web/src/components/settings/settingsSearch.ts b/apps/web/src/components/settings/settingsSearch.ts
-index ed210afd..6154b1d5 100644
+index a7b39bda..fb6ce7f7 100644
 --- a/apps/web/src/components/settings/settingsSearch.ts
 +++ b/apps/web/src/components/settings/settingsSearch.ts
 @@ -76,6 +76,7 @@ export interface SettingsSearchItem {
@@ -482,7 +482,7 @@ index ed210afd..6154b1d5 100644
    readonly managedTunnelActive?: boolean;
    readonly hasPeerLinkHost?: boolean;
    readonly hasFastWorktreeCheckoutEnvironment?: boolean;
-@@ -420,6 +422,13 @@ export const SETTINGS_SEARCH_ITEMS = [
+@@ -426,6 +428,13 @@ export const SETTINGS_SEARCH_ITEMS = [
      to: "/settings/appearance",
      searchTerms: [msg("typography family size system sans")],
    },
@@ -496,7 +496,7 @@ index ed210afd..6154b1d5 100644
    {
      id: "prompt-font",
      title: msg("Prompt font"),
-@@ -500,6 +509,12 @@ export const SETTINGS_SEARCH_ITEMS = [
+@@ -506,6 +515,12 @@ export const SETTINGS_SEARCH_ITEMS = [
      to: "/settings/general",
      searchTerms: [msg("hide fold running monitoring threads inbox sidebar shelf")],
    },
@@ -509,7 +509,7 @@ index ed210afd..6154b1d5 100644
    {
      id: "initiative-management",
      title: "Enable initiative management",
-@@ -1678,6 +1693,7 @@ export function filterAvailableSettingsSearchItems(
+@@ -1684,6 +1699,7 @@ export function filterAvailableSettingsSearchItems(
        (!item.primaryEnvironmentOnly || availability.hasPrimaryEnvironment === true) &&
        (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
        (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement) &&
@@ -545,10 +545,10 @@ index 279dbd39..99d357a4 100644
      hasCloudPublicConfig: cloudPublicConfig,
      hasEnvironment,
 diff --git a/apps/web/src/index.css b/apps/web/src/index.css
-index 272c0269..feab4b53 100644
+index aac51580..03abb35a 100644
 --- a/apps/web/src/index.css
 +++ b/apps/web/src/index.css
-@@ -2676,3 +2676,57 @@ code {
+@@ -2704,3 +2704,57 @@ code {
  .messages-timeline-scroll:focus-visible {
    outline: none;
  }
@@ -644,7 +644,7 @@ index 9dc56d7a..99b73417 100644
    it("keeps cleanup disabled for existing installations", () => {
      expect(decodeServerSettings({}).worktreeCleanup).toBeNull();
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index bc8edd52..e86378c3 100644
+index d8e986df..1b348bf0 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
 @@ -173,6 +173,14 @@ export const InterfaceFontSize = Schema.Int.check(
@@ -662,7 +662,7 @@ index bc8edd52..e86378c3 100644
  export const MIN_PROMPT_FONT_SIZE = 12;
  export const MAX_PROMPT_FONT_SIZE = 20;
  export const PromptFontSize = Schema.Int.check(
-@@ -491,6 +499,10 @@ export const ClientSettingsSchema = Schema.Struct({
+@@ -498,6 +506,10 @@ export const ClientSettingsSchema = Schema.Struct({
    fontSizeInterface: InterfaceFontSize.pipe(
      Schema.withDecodingDefault(Effect.succeed(DEFAULT_INTERFACE_FONT_SIZE)),
    ),
@@ -673,7 +673,7 @@ index bc8edd52..e86378c3 100644
    fontSizePrompt: PromptFontSize.pipe(
      Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROMPT_FONT_SIZE)),
    ),
-@@ -2152,6 +2164,8 @@ export const ClientSettingsPatch = Schema.Struct({
+@@ -2175,6 +2187,8 @@ export const ClientSettingsPatch = Schema.Struct({
    glassOpacity: Schema.optionalKey(GlassOpacity),
    onboardingCompletedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
    fontSizeInterface: Schema.optionalKey(InterfaceFontSize),

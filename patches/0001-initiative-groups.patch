@@ -224,7 +224,7 @@ index 00000000..fbb41f4a
 +  );
 +});
 diff --git a/apps/server/src/mcp/OrchestratorMcpService.test.ts b/apps/server/src/mcp/OrchestratorMcpService.test.ts
-index 551a8410..c740d127 100644
+index c99f9b0a..8bd8b4a1 100644
 --- a/apps/server/src/mcp/OrchestratorMcpService.test.ts
 +++ b/apps/server/src/mcp/OrchestratorMcpService.test.ts
 @@ -3324,6 +3324,13 @@ describe("OrchestratorMcpService provider resolution", () => {
@@ -282,7 +282,7 @@ index 551a8410..c740d127 100644
            // The creation receipt exists, but this prompt has not been accepted yet.
            const withPrompt = {
 diff --git a/apps/server/src/mcp/OrchestratorMcpService.ts b/apps/server/src/mcp/OrchestratorMcpService.ts
-index 8b585042..5175abdd 100644
+index b9568a43..576c227d 100644
 --- a/apps/server/src/mcp/OrchestratorMcpService.ts
 +++ b/apps/server/src/mcp/OrchestratorMcpService.ts
 @@ -1,3 +1,4 @@
@@ -290,7 +290,7 @@ index 8b585042..5175abdd 100644
  import {
    CommandId,
    type RunId,
-@@ -3426,8 +3427,15 @@ const make = Effect.gen(function* () {
+@@ -3471,8 +3472,15 @@ const make = Effect.gen(function* () {
                      ),
                    ),
                  );
@@ -549,10 +549,10 @@ index 00000000..2c3b8fa6
 +  }).pipe(Effect.provide(layer));
 +});
 diff --git a/apps/server/src/mcp/toolkits/project/handlers.test.ts b/apps/server/src/mcp/toolkits/project/handlers.test.ts
-index d03b038e..054385d4 100644
+index a40d1525..10f080d8 100644
 --- a/apps/server/src/mcp/toolkits/project/handlers.test.ts
 +++ b/apps/server/src/mcp/toolkits/project/handlers.test.ts
-@@ -45,6 +45,7 @@ import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
+@@ -47,6 +47,7 @@ import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
  import * as VcsProcess from "../../../vcs/VcsProcess.ts";
  import * as McpInvocationContext from "../../McpInvocationContext.ts";
  import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -560,7 +560,7 @@ index d03b038e..054385d4 100644
  import * as ProjectHandlers from "./handlers.ts";
  import { ProjectToolkit } from "./tools.ts";
  
-@@ -64,6 +65,7 @@ const clientLaunchHarness = (input: {
+@@ -66,6 +67,7 @@ const clientLaunchHarness = (input: {
    readonly hostedAppUrl?: string;
    /** The orchestrator refuses the new thread's mode, as under a managed ceiling. */
    readonly refusedByCeiling?: true;
@@ -568,7 +568,7 @@ index d03b038e..054385d4 100644
  }) => {
    const projectId = ProjectId.make("project:client-target");
    const modelSelection = {
-@@ -107,19 +109,30 @@ const clientLaunchHarness = (input: {
+@@ -109,19 +111,30 @@ const clientLaunchHarness = (input: {
      Layer.succeed(McpInvocationContext.McpInvocationContext, {
        environmentId: EnvironmentId.make("environment"),
        requestNamespace: "client:session-1",
@@ -606,7 +606,7 @@ index d03b038e..054385d4 100644
          const launch = input.launched.find((candidate) => candidate.threadId === threadId);
          return Effect.succeed(
            launch === undefined
-@@ -472,38 +485,83 @@ it.effect("a launch with a model its provider does not advertise creates no thre
+@@ -474,38 +487,83 @@ it.effect("a launch with a model its provider does not advertise creates no thre
  it.effect("a launch retried with the same clientRequestId replays the first one", () =>
    Effect.gen(function* () {
      const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
@@ -719,7 +719,7 @@ index d03b038e..054385d4 100644
  );
  
 diff --git a/apps/server/src/mcp/toolkits/project/handlers.ts b/apps/server/src/mcp/toolkits/project/handlers.ts
-index 511dcfe2..962f0573 100644
+index f92df228..205ba675 100644
 --- a/apps/server/src/mcp/toolkits/project/handlers.ts
 +++ b/apps/server/src/mcp/toolkits/project/handlers.ts
 @@ -1,3 +1,4 @@
@@ -727,7 +727,7 @@ index 511dcfe2..962f0573 100644
  import {
    CommandId,
    MessageId,
-@@ -488,9 +489,19 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
+@@ -501,9 +502,19 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
            }),
          );
          const thread = result.projection.thread;
@@ -861,21 +861,21 @@ index 9803e8b4..757e6b18 100644
    ThreadSearchTool,
    ThreadConfigureTool,
 diff --git a/apps/server/src/provider/agentContextBudget.json b/apps/server/src/provider/agentContextBudget.json
-index 169fac6c..52f92c82 100644
+index 4089b32f..2a9be6f5 100644
 --- a/apps/server/src/provider/agentContextBudget.json
 +++ b/apps/server/src/provider/agentContextBudget.json
 @@ -1,5 +1,5 @@
  {
    "claudeSystemAppendBytes": 6245,
    "codexAdditionalContextBytes": 7639,
--  "mcpToolListJsonBytes": 61724
-+  "mcpToolListJsonBytes": 62793
+-  "mcpToolListJsonBytes": 61844
++  "mcpToolListJsonBytes": 62913
  }
 diff --git a/apps/server/src/ws.ts b/apps/server/src/ws.ts
-index b6922b9e..4c75b1a1 100644
+index 7ffce489..ee963af7 100644
 --- a/apps/server/src/ws.ts
 +++ b/apps/server/src/ws.ts
-@@ -1925,6 +1925,7 @@ export const layerWsRpc = (
+@@ -1945,6 +1945,7 @@ export const layerWsRpc = (
              : { managedPolicy: serverSettings.managedPolicy }),
            shellResumeCompletionMarker: true,
            shellThreadFamilies: true,
@@ -1677,7 +1677,7 @@ index 00000000..949e410b
 +  await expect.element(row(foreign.title)).not.toBeInTheDocument();
 +});
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index 59fcb56b..7dac095a 100644
+index 8d308d50..03c0b8cc 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
 @@ -1,6 +1,8 @@
@@ -1760,7 +1760,7 @@ index 59fcb56b..7dac095a 100644
        ...pinnedThreads,
        ...activeThreads,
        ...workingThreads,
-@@ -1327,6 +1355,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -1330,6 +1358,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
  
    const {
      workingShelfEnabled,
@@ -1768,7 +1768,7 @@ index 59fcb56b..7dac095a 100644
      pinnedThreads,
      draggableThreadKeys,
      activeReorderableThreadKeys,
-@@ -3513,6 +3542,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3520,6 +3549,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              sortableId={threadKey}
                              contextDrag={isContextDrag}
                              sortableDisabled={
@@ -1776,7 +1776,7 @@ index 59fcb56b..7dac095a 100644
                                renamingThreadKey === threadKey ||
                                !draggableThreadKeys.has(threadKey) ||
                                optimisticDrop !== null
-@@ -3623,6 +3653,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3630,6 +3660,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            onDraftContextMenu={handleDraftContextMenu}
                          />,
                        ];
@@ -1916,10 +1916,10 @@ index 1e704260..1da59f9d 100644
    /**
     * The shell can leave older settled threads out of snapshots (`omitOlderSettled`), and
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index e7887f88..844db55a 100644
+index a99be293..e65ed046 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
-@@ -1377,7 +1377,47 @@ export const CloudSpeechCredentials = Schema.Struct({
+@@ -1384,7 +1384,47 @@ export const CloudSpeechCredentials = Schema.Struct({
    openrouter: CloudSpeechCredential,
  });
  
@@ -1967,7 +1967,7 @@ index e7887f88..844db55a 100644
    // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
    favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
    providerModelPreferences: Schema.NullOr(ProviderModelPreferences).pipe(
-@@ -1823,6 +1863,7 @@ const ModelSelectionPatch = Schema.Struct({
+@@ -1830,6 +1870,7 @@ const ModelSelectionPatch = Schema.Struct({
  });
  
  export const ServerSettingsPatch = Schema.Struct({
@@ -1976,10 +1976,10 @@ index e7887f88..844db55a 100644
      Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
    ),
 diff --git a/packages/shared/package.json b/packages/shared/package.json
-index d12cd9b0..92eb02e1 100644
+index af45f2ad..12f2ae49 100644
 --- a/packages/shared/package.json
 +++ b/packages/shared/package.json
-@@ -670,6 +670,10 @@
+@@ -682,6 +682,10 @@
      "./assistantInsights": {
        "types": "./src/assistantInsights.ts",
        "import": "./src/assistantInsights.ts"

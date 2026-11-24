@@ -82,7 +82,7 @@ index fbb41f4a..0cb0a7f8 100644
    );
  });
 diff --git a/apps/server/src/mcp/OrchestratorMcpService.test.ts b/apps/server/src/mcp/OrchestratorMcpService.test.ts
-index c740d127..8595229a 100644
+index 8bd8b4a1..04f613fb 100644
 --- a/apps/server/src/mcp/OrchestratorMcpService.test.ts
 +++ b/apps/server/src/mcp/OrchestratorMcpService.test.ts
 @@ -3324,6 +3324,7 @@ describe("OrchestratorMcpService provider resolution", () => {
@@ -150,10 +150,10 @@ index 2c3b8fa6..17645c4d 100644
 +  }).pipe(Effect.provide(layer));
 +});
 diff --git a/apps/server/src/mcp/toolkits/project/handlers.test.ts b/apps/server/src/mcp/toolkits/project/handlers.test.ts
-index 054385d4..9226c5c1 100644
+index 10f080d8..14bbc054 100644
 --- a/apps/server/src/mcp/toolkits/project/handlers.test.ts
 +++ b/apps/server/src/mcp/toolkits/project/handlers.test.ts
-@@ -493,6 +493,7 @@ it.effect("a launch retried with the same clientRequestId replays the first one"
+@@ -495,6 +495,7 @@ it.effect("a launch retried with the same clientRequestId replays the first one"
      });
      yield* Effect.gen(function* () {
        const settings = yield* ServerSettings.ServerSettingsService;
@@ -198,7 +198,7 @@ index cf585991..8473dcd8 100644
        if (change.action !== "create" && existing === undefined)
          return yield* new OrchestratorMcpFailure({
 diff --git a/apps/server/src/serverSettings.test.ts b/apps/server/src/serverSettings.test.ts
-index eafd8e10..528187d6 100644
+index 1a6d5b84..fe1329e5 100644
 --- a/apps/server/src/serverSettings.test.ts
 +++ b/apps/server/src/serverSettings.test.ts
 @@ -155,6 +155,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
@@ -241,7 +241,7 @@ index eafd8e10..528187d6 100644
        yield* fs.writeFileString(config.settingsPath, original);
        yield* fs.writeFileString(initiativesPath, JSON.stringify(groups));
 diff --git a/apps/server/src/serverSettings.ts b/apps/server/src/serverSettings.ts
-index f198f050..01ab5096 100644
+index 990ab63b..564a280c 100644
 --- a/apps/server/src/serverSettings.ts
 +++ b/apps/server/src/serverSettings.ts
 @@ -204,6 +204,17 @@ export function applyProviderInstanceMutation(
@@ -278,7 +278,7 @@ index f198f050..01ab5096 100644
            yield* ensureProviderInstanceMutationAllowed(currentSettings, mutation, "test settings");
            const patched = applyServerSettingsPatch(currentSettings, patch);
            return applyProviderInstanceMutation(patched, mutation);
-@@ -1318,6 +1332,7 @@ const make = Effect.gen(function* () {
+@@ -1322,6 +1336,7 @@ const make = Effect.gen(function* () {
              cause: parseFailure.value,
            });
          }
@@ -287,10 +287,10 @@ index f198f050..01ab5096 100644
          // a removed provider's reference is cleared below rather than restored by persistence.
          const updated = withoutRedirectedSimlockTokens(
 diff --git a/apps/server/src/ws.ts b/apps/server/src/ws.ts
-index 4c75b1a1..ebb95038 100644
+index ee963af7..6088ddcb 100644
 --- a/apps/server/src/ws.ts
 +++ b/apps/server/src/ws.ts
-@@ -1925,7 +1925,8 @@ export const layerWsRpc = (
+@@ -1945,7 +1945,8 @@ export const layerWsRpc = (
              : { managedPolicy: serverSettings.managedPolicy }),
            shellResumeCompletionMarker: true,
            shellThreadFamilies: true,
@@ -313,10 +313,10 @@ index 1da59f9d..9387f843 100644
    /**
     * The shell can leave older settled threads out of snapshots (`omitOlderSettled`), and
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index 844db55a..208da8d6 100644
+index e65ed046..c203ce46 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
-@@ -1417,6 +1417,7 @@ export const InitiativeChange = Schema.Union([
+@@ -1424,6 +1424,7 @@ export const InitiativeChange = Schema.Union([
  export type InitiativeChange = typeof InitiativeChange.Type;
  
  export const ServerSettings = Schema.Struct({
@@ -324,7 +324,7 @@ index 844db55a..208da8d6 100644
    initiatives: Initiatives.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
    // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
    favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
-@@ -1808,6 +1809,7 @@ export const ServerSettingsOperation = Schema.Literals([
+@@ -1815,6 +1816,7 @@ export const ServerSettingsOperation = Schema.Literals([
    "prepare-directory",
    "write-managed-setting",
    "use-disallowed-provider",
@@ -332,7 +332,7 @@ index 844db55a..208da8d6 100644
  ]);
  export type ServerSettingsOperation = typeof ServerSettingsOperation.Type;
  
-@@ -1831,6 +1833,8 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
+@@ -1838,6 +1840,8 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
    },
  ) {
    override get message(): string {
@@ -341,7 +341,7 @@ index 844db55a..208da8d6 100644
      if (this.operation === "write-managed-setting") {
        return `${this.managedSetting ?? "This setting"} is managed by ${this.managedBy ?? "your organization"} and cannot be changed.`;
      }
-@@ -1913,6 +1917,7 @@ export const ServerSettingsPatch = Schema.Struct({
+@@ -1920,6 +1924,7 @@ export const ServerSettingsPatch = Schema.Struct({
      }),
    ),
    worktreesDirectory: Schema.optionalKey(TrimmedString),

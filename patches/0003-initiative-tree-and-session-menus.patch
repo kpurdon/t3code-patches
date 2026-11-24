@@ -248,7 +248,7 @@ index aa9af60d..2cd1fec6 100644
 +  expect(dispatchedCommands()).toEqual(commandsBeforeMenu);
  });
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index 7dac095a..3da82fd3 100644
+index 03c0b8cc..17e71e25 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
 @@ -140,6 +140,7 @@ import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
@@ -259,7 +259,7 @@ index 7dac095a..3da82fd3 100644
  import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
  import { useLocalStorage } from "../hooks/useLocalStorage";
  import { useNowMinute } from "../hooks/useNowMinute";
-@@ -967,6 +968,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -970,6 +971,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
    const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
    const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
    const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -267,7 +267,7 @@ index 7dac095a..3da82fd3 100644
    const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
    const {
      settleThread,
-@@ -2732,6 +2734,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -2739,6 +2741,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
          const clicked = await settlePromise(() =>
            api.contextMenu.show(
              buildThreadActionMenuItems({
@@ -275,7 +275,7 @@ index 7dac095a..3da82fd3 100644
                canOperate: readEnvironmentScope(
                  threadRef.environmentId,
                  AuthOrchestrationOperateScope,
-@@ -2772,6 +2775,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -2779,6 +2782,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
            ),
          );
          if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -283,7 +283,7 @@ index 7dac095a..3da82fd3 100644
          if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
          if (clicked.value?.startsWith("snooze:")) {
            const preset =
-@@ -3436,6 +3440,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3443,6 +3447,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
            {!isSearchingThreads &&
            !hasProjectFolders &&
            visibleDraftSessionCount === 0 &&
@@ -291,7 +291,7 @@ index 7dac095a..3da82fd3 100644
            pinnedThreads.length +
              activeThreads.length +
              workingThreads.length +
-@@ -3523,6 +3528,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3530,6 +3535,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                          section: SidebarSection,
                          // The tree row of the project folder this row sits in.
                          folderRow?: string,
@@ -299,7 +299,7 @@ index 7dac095a..3da82fd3 100644
                        ) => {
                          const threadKey = scopedThreadKey(
                            scopeThreadRef(thread.environmentId, thread.id),
-@@ -3549,6 +3555,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3556,6 +3562,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              }
                              thread={thread}
                              variant={rowVariant}
@@ -308,7 +308,7 @@ index 7dac095a..3da82fd3 100644
                              navigationParent={
                                folderRow ??
                                (section === "working" ||
-@@ -3658,11 +3666,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3665,11 +3673,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            key="initiatives"
                            threads={threads}
                            groups={initiatives.groups}
@@ -352,7 +352,7 @@ index 00000000..bd84da20
 +  return useEditor((state) => state.target);
 +}
 diff --git a/apps/web/src/components/sidebar/SidebarThreadRow.tsx b/apps/web/src/components/sidebar/SidebarThreadRow.tsx
-index 2aa9be4c..1c9cf39a 100644
+index 1811f17a..45488b72 100644
 --- a/apps/web/src/components/sidebar/SidebarThreadRow.tsx
 +++ b/apps/web/src/components/sidebar/SidebarThreadRow.tsx
 @@ -586,6 +586,8 @@ type SidebarThreadRowProps = {

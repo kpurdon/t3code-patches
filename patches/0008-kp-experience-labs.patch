@@ -71,7 +71,7 @@ index 0cb0a7f8..3d05752b 100644
      if (assignedId === undefined)
        return yield* new OrchestratorMcpFailure({
 diff --git a/apps/server/src/mcp/OrchestratorMcpService.test.ts b/apps/server/src/mcp/OrchestratorMcpService.test.ts
-index 8595229a..f46e3801 100644
+index 04f613fb..def1ac44 100644
 --- a/apps/server/src/mcp/OrchestratorMcpService.test.ts
 +++ b/apps/server/src/mcp/OrchestratorMcpService.test.ts
 @@ -3324,7 +3324,7 @@ describe("OrchestratorMcpService provider resolution", () => {
@@ -171,10 +171,10 @@ index 17645c4d..cbf29ce1 100644
 +  },
 +);
 diff --git a/apps/server/src/mcp/toolkits/project/handlers.test.ts b/apps/server/src/mcp/toolkits/project/handlers.test.ts
-index 9226c5c1..671af141 100644
+index 14bbc054..ce889ed5 100644
 --- a/apps/server/src/mcp/toolkits/project/handlers.test.ts
 +++ b/apps/server/src/mcp/toolkits/project/handlers.test.ts
-@@ -493,7 +493,7 @@ it.effect("a launch retried with the same clientRequestId replays the first one"
+@@ -495,7 +495,7 @@ it.effect("a launch retried with the same clientRequestId replays the first one"
      });
      yield* Effect.gen(function* () {
        const settings = yield* ServerSettings.ServerSettingsService;
@@ -201,7 +201,7 @@ index 8473dcd8..c4fc47f9 100644
    return settings;
  });
 diff --git a/apps/server/src/serverSettings.test.ts b/apps/server/src/serverSettings.test.ts
-index 528187d6..3f01fd6e 100644
+index fe1329e5..582629c2 100644
 --- a/apps/server/src/serverSettings.test.ts
 +++ b/apps/server/src/serverSettings.test.ts
 @@ -155,7 +155,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
@@ -242,7 +242,7 @@ index 528187d6..3f01fd6e 100644
        yield* fs.writeFileString(config.settingsPath, original);
        yield* fs.writeFileString(initiativesPath, JSON.stringify(groups));
 diff --git a/apps/server/src/serverSettings.ts b/apps/server/src/serverSettings.ts
-index 01ab5096..b70f588f 100644
+index 564a280c..91660b34 100644
 --- a/apps/server/src/serverSettings.ts
 +++ b/apps/server/src/serverSettings.ts
 @@ -210,7 +210,7 @@ function ensureInitiativeWritesAllowed(
@@ -255,10 +255,10 @@ index 01ab5096..b70f588f 100644
      : Effect.void;
  }
 diff --git a/apps/server/src/ws.ts b/apps/server/src/ws.ts
-index ebb95038..5ee22be5 100644
+index 6088ddcb..9b1a6052 100644
 --- a/apps/server/src/ws.ts
 +++ b/apps/server/src/ws.ts
-@@ -1925,8 +1925,8 @@ export const layerWsRpc = (
+@@ -1945,8 +1945,8 @@ export const layerWsRpc = (
              : { managedPolicy: serverSettings.managedPolicy }),
            shellResumeCompletionMarker: true,
            shellThreadFamilies: true,
@@ -716,10 +716,10 @@ index f6354fb8..6edcdf05 100644
    const searchableSetting = useSearchableSetting();
    const settings = useScopedSettings();
 diff --git a/apps/web/src/components/settings/settingsSearch.ts b/apps/web/src/components/settings/settingsSearch.ts
-index 1f38ed95..ed210afd 100644
+index fa933349..a7b39bda 100644
 --- a/apps/web/src/components/settings/settingsSearch.ts
 +++ b/apps/web/src/components/settings/settingsSearch.ts
-@@ -500,6 +500,12 @@ export const SETTINGS_SEARCH_ITEMS = [
+@@ -506,6 +506,12 @@ export const SETTINGS_SEARCH_ITEMS = [
      to: "/settings/general",
      searchTerms: [msg("hide fold running monitoring threads inbox sidebar shelf")],
    },
@@ -829,10 +829,10 @@ index 9387f843..a61c746f 100644
    /**
     * The shell can leave older settled threads out of snapshots (`omitOlderSettled`), and
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index 208da8d6..bc8edd52 100644
+index c203ce46..d8e986df 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
-@@ -1417,7 +1417,9 @@ export const InitiativeChange = Schema.Union([
+@@ -1424,7 +1424,9 @@ export const InitiativeChange = Schema.Union([
  export type InitiativeChange = typeof InitiativeChange.Type;
  
  export const ServerSettings = Schema.Struct({
@@ -843,7 +843,7 @@ index 208da8d6..bc8edd52 100644
    initiatives: Initiatives.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
    // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
    favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
-@@ -1834,7 +1836,7 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
+@@ -1841,7 +1843,7 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
  ) {
    override get message(): string {
      if (this.operation === "initiative-disabled")
@@ -852,7 +852,7 @@ index 208da8d6..bc8edd52 100644
      if (this.operation === "write-managed-setting") {
        return `${this.managedSetting ?? "This setting"} is managed by ${this.managedBy ?? "your organization"} and cannot be changed.`;
      }
-@@ -1917,7 +1919,7 @@ export const ServerSettingsPatch = Schema.Struct({
+@@ -1924,7 +1926,7 @@ export const ServerSettingsPatch = Schema.Struct({
      }),
    ),
    worktreesDirectory: Schema.optionalKey(TrimmedString),
