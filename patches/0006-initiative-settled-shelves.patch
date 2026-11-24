@@ -512,7 +512,7 @@ index 5b48a613..1d9cf04a 100644
      expect(savedServerSettings().initiatives.other?.memberThreadIds).not.toContain(flat.id),
    );
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index c1563af2..5972c7ce 100644
+index a4080cb9..9f26a5fc 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
 @@ -507,11 +507,18 @@ function useSidebarThreads(input: {
@@ -564,7 +564,7 @@ index c1563af2..5972c7ce 100644
      snoozedThreadKeys: new Set(snoozedThreads.map(threadShellKey)),
      sectionByThreadKey,
      pinnedKeys: pinnedThreads.map(threadShellKey),
-@@ -3874,7 +3886,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3881,7 +3893,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                          ) : null,
                        );
                        if (showOtherSessions) {
@@ -573,7 +573,7 @@ index c1563af2..5972c7ce 100644
                            <li
                              key="other-sessions"
                              data-testid="sidebar-ungrouped-threads"
-@@ -3886,7 +3898,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3893,7 +3905,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            </li>,
                          );
                        } else if (!hasVisibleInitiatives || from !== null) {

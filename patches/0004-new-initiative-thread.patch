@@ -782,7 +782,7 @@ index 2cd1fec6..5b48a613 100644
    await expect
      .element(page.getByTestId("sidebar-settled-shelf-toggle"))
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index 3da82fd3..c1563af2 100644
+index 17e71e25..a4080cb9 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
 @@ -1,7 +1,9 @@
@@ -796,7 +796,7 @@ index 3da82fd3..c1563af2 100644
  import { initiativeLayout } from "./InitiativeSidebar.logic";
  import { attachSidebarTree } from "../lib/sidebarTree";
  import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
-@@ -1065,6 +1067,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -1068,6 +1070,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
    const highlightedProjectScopeKeyRef = useRef<string | null>(null);
    // Hold dropped rows until server placement is confirmed; block another pickup from replacing the hold.
    const [optimisticDrop, setOptimisticDrop] = useState<SidebarOptimisticDrop | null>(null);
@@ -806,7 +806,7 @@ index 3da82fd3..c1563af2 100644
    const threadSearchInputRef = useRef<HTMLInputElement>(null);
    const [threadSearchQuery, setThreadSearchQuery] = useState("");
    const [searchHighlightKey, setSearchHighlightKey] = useState<string | null>(null);
-@@ -3326,6 +3331,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3333,6 +3338,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                    </ComboboxPopup>
                  </Combobox>
                }
@@ -814,7 +814,7 @@ index 3da82fd3..c1563af2 100644
                onNewThread={handleNewThreadClick}
                newThreadDisabled={projects.length === 0}
                newThreadShortcutLabel={newThreadShortcutLabel}
-@@ -3523,6 +3529,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3530,6 +3536,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                      )}
                    >
                      {(() => {
@@ -832,7 +832,7 @@ index 3da82fd3..c1563af2 100644
                        const renderThreadRow = (
                          thread: EnvironmentThreadShell,
                          section: SidebarSection,
-@@ -3539,9 +3556,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3546,9 +3563,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            ? folderRowsMultiline
                              ? "folder-multiline"
                              : "folder"
@@ -847,7 +847,7 @@ index 3da82fd3..c1563af2 100644
                          return (
                            <SortableThreadRow
                              key={threadKey}
-@@ -3647,7 +3666,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3654,7 +3673,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                          );
                        };
                        const from = isContextDrag ? null : (dragState?.activeSection ?? null);
@@ -856,7 +856,7 @@ index 3da82fd3..c1563af2 100644
                          <SidebarDraftBlock
                            key="draft-sessions"
                            draftIds={draftIds}
-@@ -3661,8 +3680,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3668,8 +3687,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            onDraftContextMenu={handleDraftContextMenu}
                          />,
                        ];
@@ -867,7 +867,7 @@ index 3da82fd3..c1563af2 100644
                            key="initiatives"
                            threads={threads}
                            groups={initiatives.groups}
-@@ -3678,17 +3698,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3685,17 +3705,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              navigateToThread(scopeThreadRef(environmentId, id))
                            }
                          />,
@@ -890,7 +890,7 @@ index 3da82fd3..c1563af2 100644
                                <SidebarProjectFolderHeader
                                  key={`project-folder:${folder.group.projectKey}`}
                                  group={folder.group}
-@@ -3700,7 +3722,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3707,7 +3729,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                />,
                              );
                              for (const thread of folder.threads) {
@@ -899,7 +899,7 @@ index 3da82fd3..c1563af2 100644
                                  renderThreadRow(
                                    thread,
                                    "active",
-@@ -3713,7 +3735,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3720,7 +3742,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                          }
                          switch (item.marker) {
                            case "pinned-header":
@@ -908,7 +908,7 @@ index 3da82fd3..c1563af2 100644
                                <SidebarDragBoundary
                                  key="pinned-header"
                                  marker="pinned-header"
-@@ -3724,7 +3746,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3731,7 +3753,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "pinned-divider":
@@ -917,7 +917,7 @@ index 3da82fd3..c1563af2 100644
                                <SidebarDragBoundary
                                  key="pinned-divider"
                                  marker="pinned-divider"
-@@ -3735,7 +3757,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3742,7 +3764,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "active-placeholder":
@@ -926,7 +926,7 @@ index 3da82fd3..c1563af2 100644
                                <SidebarSectionPlaceholder
                                  key="active-placeholder"
                                  marker="active-placeholder"
-@@ -3753,11 +3775,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3760,11 +3782,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "working-header":
@@ -940,7 +940,7 @@ index 3da82fd3..c1563af2 100644
                                  label={gt("Working", { $context: "sidebar section" })}
                                  count={workingThreads.length}
                                  toggle={{
-@@ -3768,11 +3790,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3775,11 +3797,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "snoozed-header":
@@ -956,7 +956,7 @@ index 3da82fd3..c1563af2 100644
                                  label={gt("Snoozed", { $context: "sidebar section" })}
                                  count={snoozedThreads.length}
                                  toggle={{
-@@ -3783,12 +3807,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3790,12 +3814,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "settled-header":
@@ -973,7 +973,7 @@ index 3da82fd3..c1563af2 100644
                                  )}
                                  label={gt("Settled", { $context: "sidebar section" })}
                                  count={settledCount}
-@@ -3802,7 +3828,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3809,7 +3835,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              );
                              break;
                            case "settled-placeholder":
@@ -982,7 +982,7 @@ index 3da82fd3..c1563af2 100644
                                <SidebarSectionPlaceholder
                                  key="settled-placeholder"
                                  marker="settled-placeholder"
-@@ -3821,37 +3847,49 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3828,37 +3854,49 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                              break;
                          }
                        }
@@ -1061,7 +1061,7 @@ index 3da82fd3..c1563af2 100644
                    </ul>
                  </SortableContext>
                </DndContext>
-@@ -3859,6 +3897,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3866,6 +3904,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
            ) : null}
          </SidebarGroup>
        </SidebarContent>
