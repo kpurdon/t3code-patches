@@ -22,7 +22,7 @@ Install Git and Python 3.9 or newer. From this checkout:
 
 Open the patched launcher from Spotlight or run `./t3code-patches launch`. Keep this checkout at a stable path because the launcher references it. The launcher uses the T3 and Chromium profiles under `~/.local/share/t3code-patches/`, including existing Patched Beta sessions. The running window belongs to the official app. Pin the launcher from Finder to the Dock to load the patches on subsequent launches.
 
-Validated base: official Nightly `v0.1.12-nightly.20261125.5230` (`ca81b7b97a1c`). For an exact validation build, use `nightly-update --version 0.1.12-nightly.20261125.5230` with a separate `--data-dir` placed before the command.
+Validated base: official Nightly `v0.1.13-nightly.20261125.5245` (`1c3f0ee88fc7`). For an exact validation build, use `nightly-update --version 0.1.13-nightly.20261125.5245` with a separate `--data-dir` placed before the command.
 
 The updater downloads the matching official macOS release, verifies its digest and Apple signing identity, and stages the app in a versioned directory. It resolves the app's exact embedded source revision, applies `patches/*.patch`, runs `checks.json`, and builds the web, server, and desktop bundles. The loader uses the official app's native helpers and public T3 Connect settings. It requires the `RunAsNode` and startup-inspector Electron fuses.
 
