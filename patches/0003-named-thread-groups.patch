@@ -1,5 +1,5 @@
 diff --git a/apps/server/src/serverSettings.test.ts b/apps/server/src/serverSettings.test.ts
-index e8efe5d2f9..ca1843fcfb 100644
+index 9b2f842387..6790b51184 100644
 --- a/apps/server/src/serverSettings.test.ts
 +++ b/apps/server/src/serverSettings.test.ts
 @@ -15,6 +15,7 @@ import {
@@ -7,10 +7,10 @@ index e8efe5d2f9..ca1843fcfb 100644
    ServerSettings,
    ServerSettingsPatch,
 +  ThreadId,
+   UsageLimitSourceConfig,
    UsageLimitSourceId,
    type SimlockDeviceHostConfig,
- } from "@t3tools/contracts";
-@@ -139,6 +140,111 @@ function strictSecretReferencePaths(
+@@ -149,6 +150,111 @@ function strictSecretReferencePaths(
  }
  
  it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings", (it) => {
@@ -123,7 +123,7 @@ index e8efe5d2f9..ca1843fcfb 100644
      Effect.gen(function* () {
        const service = yield* ServerSettingsModule.ServerSettingsService;
 diff --git a/apps/server/src/serverSettings.ts b/apps/server/src/serverSettings.ts
-index 822254afcc..b1092412fa 100644
+index 7254c43ca1..bd7088781a 100644
 --- a/apps/server/src/serverSettings.ts
 +++ b/apps/server/src/serverSettings.ts
 @@ -16,6 +16,8 @@ import {
@@ -143,7 +143,7 @@ index 822254afcc..b1092412fa 100644
  import * as Schema from "effect/Schema";
  import * as SchemaTransformation from "effect/SchemaTransformation";
  import * as Semaphore from "effect/Semaphore";
-@@ -396,9 +399,21 @@ export const readServerSettingsFromDisk = Effect.gen(function* () {
+@@ -412,9 +415,21 @@ export const readServerSettingsFromDisk = Effect.gen(function* () {
      Option.isNone(raw) ? managed.defaults : decodeSettingsFile(raw.value, managed).settings,
    );
  }).pipe(Effect.withSpan("ServerSettings.readServerSettingsFromDisk"));
@@ -165,7 +165,7 @@ index 822254afcc..b1092412fa 100644
      bitbucket: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
      github: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
    }),
-@@ -833,8 +848,55 @@ const make = Effect.gen(function* () {
+@@ -839,8 +854,55 @@ const make = Effect.gen(function* () {
      },
    );
  
@@ -221,7 +221,7 @@ index 822254afcc..b1092412fa 100644
      let legacyProviders: Readonly<Record<string, unknown>> | undefined;
      let legacySourceControl: Parameters<typeof migrateLegacySourceControlSettings>[1] = {};
      let parseFailure = Option.none<unknown>();
-@@ -842,6 +904,7 @@ const make = Effect.gen(function* () {
+@@ -848,6 +910,7 @@ const make = Effect.gen(function* () {
      if (yield* readConfigExists) {
        const file = decodeSettingsFile(yield* readRawConfig, managed);
        if (file.legacy !== undefined) {
@@ -229,7 +229,7 @@ index 822254afcc..b1092412fa 100644
          legacyProviders = file.legacy.providers;
          legacySourceControl = { bitbucket: file.legacy.bitbucket, github: file.legacy.github };
        }
-@@ -855,6 +918,21 @@ const make = Effect.gen(function* () {
+@@ -861,6 +924,21 @@ const make = Effect.gen(function* () {
          });
        }
      }
@@ -251,7 +251,7 @@ index 822254afcc..b1092412fa 100644
      // Settings saved by a server that kept the mode in `compactIdleThreads` move
      // it to `idleCompaction`, so that switch goes to clients as a boolean. The
      // defaults gain the field too, which tells clients this server reads modes.
-@@ -946,8 +1024,15 @@ const make = Effect.gen(function* () {
+@@ -952,8 +1030,15 @@ const make = Effect.gen(function* () {
      const sourceControlMigration = hasLegacySourceControl
        ? migrateLegacySourceControlSettings(folded, legacySourceControl)
        : { settings: folded, secretMoves: [] };
@@ -268,7 +268,7 @@ index 822254afcc..b1092412fa 100644
        : folded;
      if (
        migrated !== loaded ||
-@@ -959,7 +1044,7 @@ const make = Effect.gen(function* () {
+@@ -965,7 +1050,7 @@ const make = Effect.gen(function* () {
          yield* secretStore.remove(move.from).pipe(Effect.ignore);
        }
      }
@@ -277,7 +277,7 @@ index 822254afcc..b1092412fa 100644
    });
  
    const settingsCache = yield* Cache.makeWith((_key: typeof cacheKey) => loadSettingsFromDisk, {
-@@ -1225,7 +1310,14 @@ const make = Effect.gen(function* () {
+@@ -1231,7 +1316,14 @@ const make = Effect.gen(function* () {
    ): Effect.Effect<ServerSettings, ServerSettingsError> =>
      writeSemaphore.withPermits(1)(
        Effect.gen(function* () {
@@ -293,7 +293,7 @@ index 822254afcc..b1092412fa 100644
          if (Option.isSome(parseFailure)) {
            return yield* new ServerSettingsError({
              settingsPath,
-@@ -1290,7 +1382,11 @@ const make = Effect.gen(function* () {
+@@ -1296,7 +1388,11 @@ const make = Effect.gen(function* () {
              return materializedExit.value;
            }).pipe(Effect.ensuring(invalidateMaterialized)),
          );
@@ -307,10 +307,10 @@ index 822254afcc..b1092412fa 100644
          materialized = { source: next, value: resolved };
          yield* emitChange(next);
 diff --git a/apps/server/src/ws.ts b/apps/server/src/ws.ts
-index 7ffce48991..711ec98c5d 100644
+index 196f4ca8a8..fe7ba270aa 100644
 --- a/apps/server/src/ws.ts
 +++ b/apps/server/src/ws.ts
-@@ -1945,6 +1945,7 @@ export const layerWsRpc = (
+@@ -1960,6 +1960,7 @@ export const layerWsRpc = (
              : { managedPolicy: serverSettings.managedPolicy }),
            shellResumeCompletionMarker: true,
            shellThreadFamilies: true,
@@ -319,7 +319,7 @@ index 7ffce48991..711ec98c5d 100644
            shellOlderSettled: true,
            threadResumeCompletionMarker: true,
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index 8d308d501d..1a51b801b3 100644
+index 55ee326cb5..5d79a0e819 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
 @@ -130,6 +130,7 @@ import {
@@ -330,7 +330,7 @@ index 8d308d501d..1a51b801b3 100644
  import { useHandleNewThread } from "../hooks/useHandleNewThread";
  import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
  import { useProjectPin } from "../hooks/useProjectGroupUpdate";
-@@ -258,6 +259,10 @@ import {
+@@ -259,6 +260,10 @@ import {
  } from "./ui/combobox";
  import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
  import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
@@ -341,7 +341,7 @@ index 8d308d501d..1a51b801b3 100644
  import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
  import { TooltipProvider } from "./ui/tooltip";
  import {
-@@ -541,28 +546,39 @@ function useSidebarThreads(input: {
+@@ -542,28 +547,39 @@ function useSidebarThreads(input: {
    const visibleWorkingThreads = workingShelfExpanded
      ? workingThreads
      : routeThreadOnly(workingThreads, routeRowThreadKey);
@@ -397,7 +397,7 @@ index 8d308d501d..1a51b801b3 100644
      ...(projectFolders === null
        ? activeThreads
        : projectFolders.flatMap((folder) => folder.threads)),
-@@ -606,6 +622,9 @@ function useSidebarThreads(input: {
+@@ -607,6 +623,9 @@ function useSidebarThreads(input: {
      toggleSnoozedShelf: () => setSnoozedShelfExpanded((value) => !value),
      workingShelfExpanded,
      toggleWorkingShelf: () => setWorkingShelfExpanded((value) => !value),
@@ -407,7 +407,7 @@ index 8d308d501d..1a51b801b3 100644
      projectFolders,
      toggleProjectFolder: (group: SidebarProjectSnapshot) => {
        const keys = sidebarFolderExpansionKeys(group);
-@@ -1004,6 +1023,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -1009,6 +1028,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
      },
    });
    const boringSidebarEnabled = useClientSettings((settings) => settings.boringSidebarEnabled);
@@ -415,7 +415,7 @@ index 8d308d501d..1a51b801b3 100644
    const folderRowsMultiline = useClientSettings((settings) => settings.boringSidebarMultilineRows);
    const newThreadContext = useHandleNewThread();
    // Row callbacks capture only the handler; the rest of the context changes with the route.
-@@ -1350,6 +1370,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -1355,6 +1375,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
      toggleSnoozedShelf,
      workingShelfExpanded,
      toggleWorkingShelf,
@@ -424,7 +424,7 @@ index 8d308d501d..1a51b801b3 100644
      projectFolders,
      toggleProjectFolder,
      renderedSettledThreads,
-@@ -1984,7 +2006,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -1989,7 +2011,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
          event.activatorEvent instanceof PointerEvent ? event.activatorEvent.clientY : null,
      });
    };
@@ -433,7 +433,7 @@ index 8d308d501d..1a51b801b3 100644
    const sidebarListItemsFresh = ((): readonly SidebarListItem[] => {
      const rowsOf = (
        list: readonly EnvironmentThreadShell[],
-@@ -1996,7 +2018,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -2001,7 +2023,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
        });
      // Boring mode keeps a pinned open project or one the user filtered to, so it can start a thread.
      if (
@@ -442,7 +442,7 @@ index 8d308d501d..1a51b801b3 100644
        pinnedThreads.length +
          activeThreads.length +
          workingThreads.length +
-@@ -2052,6 +2074,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -2057,6 +2079,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
    // Only order, section, or draft changes need layout reads and motion.
    const listMotionLayoutKey = [
      sidebarListItemsKey,
@@ -452,7 +452,7 @@ index 8d308d501d..1a51b801b3 100644
      projectFolders
        ?.map((folder) => `${folder.group.projectKey}:${folder.threads.length}`)
        .join("\n") ?? "",
-@@ -2707,49 +2732,57 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -2716,50 +2741,58 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                  projectRef.projectId === thread.projectId,
              ),
            ) ?? null;
@@ -464,6 +464,7 @@ index 8d308d501d..1a51b801b3 100644
 -                threadRef.environmentId,
 -                AuthOrchestrationOperateScope,
 -              ),
+-              canTriage: threadTriagePermitted(threadRef.environmentId),
 -              branch: thread.branch ?? null,
 -              // An archived project is not a filter choice.
 -              projectFilter:
@@ -501,6 +502,7 @@ index 8d308d501d..1a51b801b3 100644
 +                  threadRef.environmentId,
 +                  AuthOrchestrationOperateScope,
 +                ),
++                canTriage: threadTriagePermitted(threadRef.environmentId),
 +                branch: thread.branch ?? null,
 +                // An archived project is not a filter choice.
 +                projectFilter:
@@ -543,10 +545,10 @@ index 8d308d501d..1a51b801b3 100644
 +          await namedThreadGroups.handleThreadMenu(clicked.value, threadRef);
 +          return;
 +        }
-         if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
-         if (clicked.value?.startsWith("snooze:")) {
-           const preset =
-@@ -3071,6 +3104,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+         if (
+           threadActionRequiresOperate(clicked.value) &&
+           !checkThreadOperations([thread], isThreadTriageAction(clicked.value))
+@@ -3085,6 +3118,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
    return (
      <SidebarFolderDrop>
        <SidebarChromeHeader isElectron={isElectron} />
@@ -554,7 +556,7 @@ index 8d308d501d..1a51b801b3 100644
        <SidebarContent
          ref={sidebarContentRef}
          className="min-h-full"
-@@ -3078,6 +3112,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3092,6 +3126,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
            <SidebarGroup className="z-[1]">
              <SidebarThreadHeader
                hasProjects={projectGroups.length > 0}
@@ -562,7 +564,7 @@ index 8d308d501d..1a51b801b3 100644
                projectScope={
                  <Combobox
                    items={projectScopeItems}
-@@ -3412,7 +3447,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3426,7 +3461,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
            ) : null}
            {/* A scope can hide every active thread; say so even when its project still has settled ones. */}
            {!isSearchingThreads &&
@@ -571,7 +573,7 @@ index 8d308d501d..1a51b801b3 100644
            visibleDraftSessionCount === 0 &&
            pinnedThreads.length +
              activeThreads.length +
-@@ -3638,6 +3673,32 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3652,6 +3687,32 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            continue;
                          }
                          if (projectFolders !== null && item.marker === "active-placeholder") {
@@ -605,10 +607,10 @@ index 8d308d501d..1a51b801b3 100644
                              items.push(
                                <SidebarProjectFolderHeader
 diff --git a/apps/web/src/components/settings/LabsSettingsPanel.tsx b/apps/web/src/components/settings/LabsSettingsPanel.tsx
-index 63782523ea..877d6ea772 100644
+index a89b478586..61054cd86c 100644
 --- a/apps/web/src/components/settings/LabsSettingsPanel.tsx
 +++ b/apps/web/src/components/settings/LabsSettingsPanel.tsx
-@@ -73,7 +73,7 @@ function BoringSidebarRow() {
+@@ -85,7 +85,7 @@ function BoringSidebarRow() {
      <SettingsRow
        {...searchableSetting("boring-sidebar")}
        description={gt(
@@ -1161,10 +1163,10 @@ index 0000000000..c5d323b879
 +  };
 +}
 diff --git a/packages/contracts/src/server.ts b/packages/contracts/src/server.ts
-index 1e70426001..6876fe71b5 100644
+index 68ef9c37f0..ac32957fac 100644
 --- a/packages/contracts/src/server.ts
 +++ b/packages/contracts/src/server.ts
-@@ -731,6 +731,7 @@ export const ServerConfig = Schema.Struct({
+@@ -733,6 +733,7 @@ export const ServerConfig = Schema.Struct({
     * `getThreadFamily` and `getWorktreeThreadIds` serve the rows it leaves out.
     */
    shellThreadFamilies: Schema.optionalKey(Schema.Boolean),
@@ -1173,10 +1175,10 @@ index 1e70426001..6876fe71b5 100644
    /**
     * The shell can leave older settled threads out of snapshots (`omitOlderSettled`), and
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index bf060824d2..1ad1f01897 100644
+index 15104de564..f235952886 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
-@@ -1396,7 +1396,33 @@ export const CloudSpeechCredentials = Schema.Struct({
+@@ -1402,7 +1402,33 @@ export const CloudSpeechCredentials = Schema.Struct({
    openrouter: CloudSpeechCredential,
  });
  
@@ -1210,7 +1212,7 @@ index bf060824d2..1ad1f01897 100644
    // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
    favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
    providerModelPreferences: Schema.NullOr(ProviderModelPreferences).pipe(
-@@ -1841,8 +1867,8 @@ const ModelSelectionPatch = Schema.Struct({
+@@ -1851,8 +1877,8 @@ const ModelSelectionPatch = Schema.Struct({
    options: Schema.optionalKey(ProviderOptionSelections),
  });
  
