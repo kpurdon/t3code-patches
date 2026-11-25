@@ -307,7 +307,7 @@ index 7254c43ca1..bd7088781a 100644
          materialized = { source: next, value: resolved };
          yield* emitChange(next);
 diff --git a/apps/server/src/ws.ts b/apps/server/src/ws.ts
-index 196f4ca8a8..fe7ba270aa 100644
+index a348af429d..cb89abb1db 100644
 --- a/apps/server/src/ws.ts
 +++ b/apps/server/src/ws.ts
 @@ -1960,6 +1960,7 @@ export const layerWsRpc = (
@@ -319,7 +319,7 @@ index 196f4ca8a8..fe7ba270aa 100644
            shellOlderSettled: true,
            threadResumeCompletionMarker: true,
 diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
-index 55ee326cb5..5d79a0e819 100644
+index 2ca4abf581..5e79fb847e 100644
 --- a/apps/web/src/components/Sidebar.tsx
 +++ b/apps/web/src/components/Sidebar.tsx
 @@ -130,6 +130,7 @@ import {
@@ -339,7 +339,7 @@ index 55ee326cb5..5d79a0e819 100644
 +  SidebarNamedThreadGroupHeader,
 +} from "./sidebar/SidebarNamedThreadGroups";
  import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
- import { TooltipProvider } from "./ui/tooltip";
+ import { TooltipProvider, TooltipScrollDismissArea } from "./ui/tooltip";
  import {
 @@ -542,28 +547,39 @@ function useSidebarThreads(input: {
    const visibleWorkingThreads = workingShelfExpanded
@@ -564,7 +564,7 @@ index 55ee326cb5..5d79a0e819 100644
                projectScope={
                  <Combobox
                    items={projectScopeItems}
-@@ -3426,7 +3461,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3427,7 +3462,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
            ) : null}
            {/* A scope can hide every active thread; say so even when its project still has settled ones. */}
            {!isSearchingThreads &&
@@ -573,7 +573,7 @@ index 55ee326cb5..5d79a0e819 100644
            visibleDraftSessionCount === 0 &&
            pinnedThreads.length +
              activeThreads.length +
-@@ -3652,6 +3687,32 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
+@@ -3653,6 +3688,32 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                            continue;
                          }
                          if (projectFolders !== null && item.marker === "active-placeholder") {
