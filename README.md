@@ -37,6 +37,8 @@ The hourly job follows official Nightly releases and uses the merged patch recip
 
 Add `--maintenance-thread <thread-id>` after `autoupdate nightly` to send failures and recoveries to a dedicated thread in this T3 environment. The job holds messages locally when T3 is closed and retries on the next run. It reports a patch failure once per release and retries that patch when the merged recipe changes. The maintenance agent can prepare a repair PR for review. Logs and status are in `update.log`, `runtime.log`, and `nightly-status.json` in the installation directory.
 
+To opt in to unattended merges for the configured maintenance thread, run `./t3code-patches nightly-repair-merge on`. The agent can squash-merge a repair that changes only patch files and the README’s validated base after the official signed release passes its checks and the exact PR head passes independent review. Use `nightly-repair-merge status` to check the setting and `nightly-repair-merge off` to turn it off. The opt-in is local to the selected maintenance thread.
+
 ## Development
 
 Keep feature changes in the patch and their focused validation commands in `checks.json`. Tooling checks:

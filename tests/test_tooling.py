@@ -237,10 +237,61 @@ class ToolingTest(unittest.TestCase):
                 self.assertEqual(args[:6], [str(data / 't3/bin/t3'), 'thread', 'send', '--base-dir',
                                            str(data / 't3'), 'mcp:launch:fixture'])
                 self.assertIn(json.dumps(status['pendingEvents'][0]), args[6])
+                self.assertIn(tool.MAINTENANCE_DRAFT_HANDOFF, args[6])
                 self.assertEqual(tool.read_json(data / 'nightly-status.json'), status)
                 send.return_value = types.SimpleNamespace(returncode=0)
                 tool.deliver_nightly_events(data, status)
             self.assertEqual(tool.read_json(data / 'nightly-status.json')['pendingEvents'], [])
+
+    def test_nightly_repair_merge_opt_in_follows_its_configured_thread(self):
+        with tempfile.TemporaryDirectory() as temp:
+            data = Path(temp)
+            config = data / 'nightly-maintenance.json'
+            policy = data / 'nightly-repair-merge.json'
+            args = types.SimpleNamespace(data_dir=temp, state='on')
+            with self.assertRaisesRegex(tool.Stop, 'Configure a Nightly maintenance thread'):
+                tool.nightly_repair_merge(args)
+            tool.atomic_json(config, {'thread': 'maintenance'})
+            self.assertFalse(tool.nightly_repair_merge_enabled(data, 'maintenance'))
+
+            with patch('builtins.print') as printed:
+                tool.nightly_repair_merge(args)
+                printed.assert_called_once_with('Unattended Nightly repair merges enabled.')
+            self.assertTrue(tool.nightly_repair_merge_enabled(data, 'maintenance'))
+            self.assertFalse(tool.nightly_repair_merge_enabled(data, 'replacement'))
+            self.assertEqual(tool.read_json(config), {'thread': 'maintenance'})
+
+            policy.write_text('{broken')
+            self.assertFalse(tool.nightly_repair_merge_enabled(data, 'maintenance'))
+            args.state = 'off'
+            with patch('builtins.print'):
+                tool.nightly_repair_merge(args)
+            self.assertFalse(policy.exists())
+
+    def test_nightly_notification_authorizes_only_the_current_blocked_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            data = Path(temp)
+            thread = 'mcp:launch:fixture'
+            tool.atomic_json(data / 'nightly-maintenance.json', {'thread': thread})
+            tool.atomic_json(data / 'nightly-repair-merge.json', {'thread': thread})
+            version = '0.1.13-nightly.20261125.5245'
+            old_version = '0.1.12-nightly.20261125.5230'
+            old = {'version': old_version, 'stage': 'patch', 'patch': 'feature.patch'}
+            blocked = {'version': version, 'stage': 'checks', 'patch': None}
+            status = {'blocked': blocked, 'pendingEvents': [
+                {'kind': 'failure', **old},
+                {'kind': 'recovery', 'version': version},
+                {'kind': 'failure', **blocked},
+            ]}
+            with patch.object(tool.subprocess, 'run', return_value=types.SimpleNamespace(returncode=0)) as send:
+                tool.deliver_nightly_events(data, status)
+            first, second, third = [call.args[0][6] for call in send.call_args_list]
+            for message in (first, second):
+                self.assertIn(tool.MAINTENANCE_DRAFT_HANDOFF, message)
+                self.assertNotIn(tool.MAINTENANCE_REPAIR_MERGE, message)
+            self.assertIn(tool.MAINTENANCE_REPAIR_MERGE, third)
+            self.assertIn(f'Authorized maintenance thread ID: {thread}', third)
+            self.assertEqual(status['pendingEvents'], [])
 
     def test_running_beta_blocks_launch_of_staged_nightly(self):
         with tempfile.TemporaryDirectory() as temp:
